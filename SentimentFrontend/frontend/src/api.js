@@ -48,7 +48,8 @@ export async function fetchRecent({
   if (q) url.searchParams.set("q", q);
   if (device) url.searchParams.set("device", device);
   if (backfill) url.searchParams.set("backfill", "1");
-  if (min_margin != null) url.searchParams.set("min_margin", String(min_margin));
+  if (min_margin != null)
+    url.searchParams.set("min_margin", String(min_margin));
 
   url.searchParams.set("limit", String(limit));
 
@@ -73,6 +74,12 @@ export async function ingestYouTube({
   return httpJson(apiUrl("/ingest/youtube"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, query, max_videos, comments_per_video, videoId }),
+    body: JSON.stringify({
+      topic,
+      query,
+      max_videos,
+      comments_per_video,
+      videoId,
+    }),
   });
 }

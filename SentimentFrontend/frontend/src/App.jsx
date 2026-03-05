@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchRecent, fetchTopics, apiUrl, ingestYouTube } from "./api";
 
 /* ----------------------------
@@ -217,6 +217,76 @@ function topTerms(rows, limit = 10) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
 }
 
+function topTermsWithSentiment(rows, limit = 10) {
+  const stop = new Set([
+    "the","a","an","and","or","but","to","of","in","on","for","is","it","this","that","with","as","at","by","be","are","was","were",
+    "from","you","your","they","them","their","we","our","i","me","my","just","like","have","has","had","not","dont","does","did","can",
+    "could","should","would",
+  ]);
+  const counts = new Map();
+  for (const r of rows) {
+    const label = stableLabelFromScores(getScores(r));
+    const t = (r?.clean_text || "").toLowerCase();
+    const words = t.split(/[^a-z0-9]+/g);
+    const seen = new Set();
+    for (const w of words) {
+      if (!w || w.length < 4 || stop.has(w) || seen.has(w)) continue;
+      seen.add(w);
+      if (!counts.has(w)) counts.set(w, { total: 0, pos: 0, neg: 0 });
+      const c = counts.get(w);
+      c.total++;
+      if (label === "positive") c.pos++;
+      else if (label === "negative") c.neg++;
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, limit)
+    .map(([word, c]) => {
+      const sig = c.pos + c.neg;
+      const tone = sig < 3 ? "neu" : c.pos / sig > 0.60 ? "pos" : c.pos / sig < 0.40 ? "neg" : "neu";
+      return [word, c.total, tone];
+    });
+}
+
+function useCountUp(target, duration = 700) {
+  const [display, setDisplay] = useState(target);
+  const rafRef = useRef(null);
+  const prevRef = useRef(target);
+  useEffect(() => {
+    const from = prevRef.current;
+    if (from === target) { setDisplay(target); return; }
+    prevRef.current = target;
+    const start = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + (target - from) * eased));
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [target, duration]);
+  return display;
+}
+
+function useRelativeTime(date) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!date) { setText(""); return; }
+    const update = () => {
+      const s = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (s < 10) setText("just now");
+      else if (s < 60) setText(`${s}s ago`);
+      else setText(`${Math.floor(s / 60)}m ago`);
+    };
+    update();
+    const id = setInterval(update, 10000);
+    return () => clearInterval(id);
+  }, [date]);
+  return text;
+}
+
 /* ----------------------------
    Trend chart (no libs)
 ---------------------------- */
@@ -227,9 +297,16 @@ function toDateSafe(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function formatBucketLabel(key, granularity) {
+function formatBucketLabel(key, granularity, prevKey) {
   if (granularity === "hour") {
     const hh = key.slice(11, 13);
+    const day = key.slice(0, 10);
+    const prevDay = prevKey ? prevKey.slice(0, 10) : null;
+    if (!prevKey || day !== prevDay) {
+      const m = key.slice(5, 7);
+      const d = key.slice(8, 10);
+      return `${m}/${d} ${hh}h`;
+    }
     return `${hh}:00`;
   }
   const m = key.slice(5, 7);
@@ -237,10 +314,35 @@ function formatBucketLabel(key, granularity) {
   return `${m}/${d}`;
 }
 
+function smoothLinePath(pts) {
+  if (!pts.length) return "";
+  if (pts.length === 1) return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  if (pts.length === 2) {
+    return `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)} L ${pts[1][0].toFixed(1)} ${pts[1][1].toFixed(1)}`;
+  }
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  const t = 0.25;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(pts.length - 1, i + 2)];
+    const cp1x = p1[0] + (p2[0] - p0[0]) * t;
+    const cp1y = p1[1] + (p2[1] - p0[1]) * t;
+    const cp2x = p2[0] - (p3[0] - p1[0]) * t;
+    const cp2y = p2[1] - (p3[1] - p1[1]) * t;
+    d += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
 function TrendChart({ series, granularity = "day" }) {
   const W = 980;
-  const H = 220;
-  const P = 18;
+  const H = 240;
+  const PL = 42;
+  const PR = 14;
+  const PT = 14;
+  const PB = 28;
 
   const allPoints = series.flatMap((s) => s.points);
   if (!allPoints.length) {
@@ -250,54 +352,36 @@ function TrendChart({ series, granularity = "day" }) {
   const xKeys = Array.from(new Set(allPoints.map((p) => p.xKey))).sort();
   const xIndex = new Map(xKeys.map((k, i) => [k, i]));
 
-  const xs = (i) =>
-    xKeys.length === 1 ? P : P + (i * (W - P * 2)) / (xKeys.length - 1);
+  const plotW = W - PL - PR;
+  const plotH = H - PT - PB;
 
+  const xs = (i) => xKeys.length === 1 ? PL + plotW / 2 : PL + (i * plotW) / (xKeys.length - 1);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const ys = (y) => {
-    const v = clamp(y, -1, 1);
-    return P + (1 - (v + 1) / 2) * (H - P * 2);
-  };
+  const ys = (y) => PT + (1 - (clamp(y, -1, 1) + 1) / 2) * plotH;
 
+  const baseline = ys(0);
   const gridLines = [-1, -0.5, 0, 0.5, 1];
 
-  const baselinePath = () => {
-    if (!xKeys.length) return "";
-    const y0 = ys(0);
-    return `M ${xs(0).toFixed(2)} ${y0.toFixed(2)} L ${xs(xKeys.length - 1).toFixed(
-      2
-    )} ${y0.toFixed(2)}`;
-  };
-
-  const linePath = (points) => {
-    const pts = points
+  const buildPts = (points) =>
+    points
       .filter((p) => xIndex.has(p.xKey) && p.y != null)
-      .map((p) => {
-        const i = xIndex.get(p.xKey);
-        return [xs(i), ys(p.y)];
-      });
+      .map((p) => [xs(xIndex.get(p.xKey)), ys(p.y)]);
 
-    if (!pts.length) return baselinePath();
-    if (pts.length === 1) return baselinePath();
-
-    return pts
-      .map(
-        (pt, idx) =>
-          `${idx === 0 ? "M" : "L"} ${pt[0].toFixed(2)} ${pt[1].toFixed(2)}`
-      )
-      .join(" ");
-  };
-
-  const labelCount = Math.min(8, xKeys.length);
+  const labelCount = Math.min(9, xKeys.length);
   const labelEvery = Math.max(1, Math.floor(xKeys.length / labelCount));
+  const visibleLabelIdxs = new Set(
+    xKeys
+      .map((_, i) => i)
+      .filter((i) => i % labelEvery === 0 || i === xKeys.length - 1)
+  );
 
   return (
     <div className="trendWrap">
       <div className="trendHeader">
         <div className="trendTitle">Sentiment trend</div>
         <div className="trendSub">
-          Signal net = (pos − neg) / (pos + neg) per{" "}
-          {granularity === "hour" ? "hour" : "day"} (neutral ignored)
+          Net signal = (pos − neg) / (pos + neg) per{" "}
+          {granularity === "hour" ? "hour" : "day"} · neutral excluded
         </div>
         <div className="trendLegend">
           {series.map((s) => (
@@ -318,42 +402,210 @@ function TrendChart({ series, granularity = "day" }) {
         {gridLines.map((g) => (
           <g key={g}>
             <line
-              x1={P}
-              x2={W - P}
+              x1={PL}
+              x2={W - PR}
               y1={ys(g)}
               y2={ys(g)}
               className={g === 0 ? "gridLine gridLine--mid" : "gridLine"}
             />
-            <text x={P} y={ys(g) - 6} className="gridLabel">
+            <text x={PL - 6} y={ys(g) + 4} textAnchor="end" className="gridLabel">
               {g.toFixed(1)}
             </text>
           </g>
         ))}
 
-        {series.map((s) => (
-          <path
-            key={s.name}
-            d={linePath(s.points)}
-            className={`trendLine trendLine--${s.tone}`}
-            fill="none"
-          />
-        ))}
+        {series.map((s) => {
+          const pts = buildPts(s.points);
+          if (!pts.length) return null;
+
+          if (pts.length === 1) {
+            return (
+              <g key={s.name}>
+                <line x1={PL} x2={W - PR} y1={pts[0][1]} y2={pts[0][1]}
+                  className="gridLine" strokeDasharray="4 4" />
+                <circle cx={pts[0][0]} cy={pts[0][1]} r={5}
+                  className={`trendDot trendDot--${s.tone}`} />
+              </g>
+            );
+          }
+
+          const linePd = smoothLinePath(pts);
+          const first = pts[0], last = pts[pts.length - 1];
+          const areaPd = `${linePd} L ${last[0].toFixed(1)},${baseline.toFixed(1)} L ${first[0].toFixed(1)},${baseline.toFixed(1)} Z`;
+
+          return (
+            <g key={s.name}>
+              <path d={areaPd} className={`trendArea trendArea--${s.tone}`} />
+              <path d={linePd} className={`trendLine trendLine--${s.tone}`} fill="none" />
+              {pts.map(([px, py], di) => (
+                <circle key={di} cx={px} cy={py} r={3} className={`trendDot trendDot--${s.tone}`} />
+              ))}
+            </g>
+          );
+        })}
 
         {xKeys.map((k, idx) => {
-          if (idx % labelEvery !== 0 && idx !== xKeys.length - 1) return null;
+          if (!visibleLabelIdxs.has(idx)) return null;
+          const prevVisIdx = [...visibleLabelIdxs].filter((i) => i < idx).pop();
+          const prevKey = prevVisIdx != null ? xKeys[prevVisIdx] : null;
           return (
-            <text
-              key={k}
-              x={xs(idx)}
-              y={H - 6}
-              textAnchor="middle"
-              className="xLabel"
-            >
-              {formatBucketLabel(k, granularity)}
+            <text key={k} x={xs(idx)} y={H - 6} textAnchor="middle" className="xLabel">
+              {formatBucketLabel(k, granularity, prevKey)}
             </text>
           );
         })}
       </svg>
+    </div>
+  );
+}
+
+/* ----------------------------
+   Donut chart
+---------------------------- */
+
+function polarXY(cx, cy, r, angleDeg) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+
+function donutArc(cx, cy, R, r, startDeg, endDeg) {
+  const span = endDeg - startDeg;
+  if (span <= 0) return "";
+  const end = span >= 360 ? startDeg + 359.9 : endDeg;
+  const [x1, y1] = polarXY(cx, cy, R, startDeg);
+  const [x2, y2] = polarXY(cx, cy, R, end);
+  const [ix1, iy1] = polarXY(cx, cy, r, end);
+  const [ix2, iy2] = polarXY(cx, cy, r, startDeg);
+  const large = span > 180 ? 1 : 0;
+  return `M ${x1.toFixed(2)},${y1.toFixed(2)} A ${R},${R} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L ${ix1.toFixed(2)},${iy1.toFixed(2)} A ${r},${r} 0 ${large} 0 ${ix2.toFixed(2)},${iy2.toFixed(2)} Z`;
+}
+
+function DonutChart({ label, pos, neu, neg }) {
+  const total = pos + neu + neg;
+  const W = 200, H = 200, cx = 100, cy = 100, R = 76, r = 50;
+
+  if (!total) {
+    return (
+      <div className="donutWrap">
+        <div className="donutTitle">{label}</div>
+        <div className="donutEmpty">No data yet</div>
+      </div>
+    );
+  }
+
+  const pPct = pos / total;
+  const neuPct = neu / total;
+  const negPct = neg / total;
+  const posEnd = pPct * 360;
+  const neuEnd = posEnd + neuPct * 360;
+
+  const dominant = pos >= neg && pos >= neu ? "positive" : neg >= pos && neg >= neu ? "negative" : "neutral";
+  const domPct = dominant === "positive" ? pPct : dominant === "negative" ? negPct : neuPct;
+
+  const segments = [
+    { key: "pos", start: 0, end: posEnd, cls: "donutSeg--pos" },
+    { key: "neu", start: posEnd, end: neuEnd, cls: "donutSeg--neu" },
+    { key: "neg", start: neuEnd, end: 360, cls: "donutSeg--neg" },
+  ];
+
+  return (
+    <div className="donutWrap">
+      <div className="donutTitle">{label}</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="donutSvg">
+        {segments.map((s) =>
+          (s.end - s.start) > 0.5 ? (
+            <path key={s.key} d={donutArc(cx, cy, R, r, s.start, s.end)}
+              className={`donutSeg ${s.cls}`} />
+          ) : null
+        )}
+        <text x={cx} y={cy - 8} className="donutCenterBig" textAnchor="middle">
+          {Math.round(domPct * 100)}%
+        </text>
+        <text x={cx} y={cy + 14} className="donutCenterSub" textAnchor="middle">
+          {dominant}
+        </text>
+      </svg>
+      <div className="donutLegend">
+        <span className="donutLegItem donutLegItem--pos">▲ {Math.round(pPct * 100)}% pos</span>
+        <span className="donutLegItem donutLegItem--neu">● {Math.round(neuPct * 100)}% neu</span>
+        <span className="donutLegItem donutLegItem--neg">▼ {Math.round(negPct * 100)}% neg</span>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------
+   Battle Banner
+---------------------------- */
+
+function BattleBanner({ sumIphone, sumAndroid, decision, loading }) {
+  const ipSig = sumIphone.signal || 0;
+  const anSig = sumAndroid.signal || 0;
+  const total = ipSig + anSig || 1;
+  const ipW = ((ipSig / total) * 100).toFixed(1);
+  const anW = ((anSig / total) * 100).toFixed(1);
+  const ipPosRate = sumIphone.signal > 0 ? Math.round((sumIphone.pos / sumIphone.signal) * 100) : null;
+  const anPosRate = sumAndroid.signal > 0 ? Math.round((sumAndroid.pos / sumAndroid.signal) * 100) : null;
+  const hasData = ipSig > 0 || anSig > 0;
+  const showVerdict = hasData && decision.label && decision.label !== "Not enough signal" && decision.label !== "Even";
+
+  return (
+    <div className="battleBanner">
+      <div className="battleSide battleSide--ip">
+        <div className="battleEmoji">🍎</div>
+        <div className="battleName">iPhone</div>
+        {ipPosRate != null ? (
+          <>
+            <div className="battlePct">{ipPosRate}%</div>
+            <div className="battleSub">positive sentiment</div>
+          </>
+        ) : (
+          <div className="battleSub">no data yet</div>
+        )}
+      </div>
+
+      <div className="battleCenter">
+        {loading ? (
+          <div className="battleLoading">Analyzing comments…</div>
+        ) : showVerdict ? (
+          <div className="battleVerdict">
+            {decision.label === "iPhone" ? "🍎" : "🤖"}{" "}
+            <span>{decision.label}</span>{" "}
+            <span className="battleVerdictSub">leads</span>
+          </div>
+        ) : hasData ? (
+          <div className="battleVs">TOO CLOSE</div>
+        ) : (
+          <div className="battleVs">VS</div>
+        )}
+        <div className="battleBarTrack">
+          <div className="battleBarFill--ip" style={{ width: `${ipW}%` }} />
+          <div className="battleBarFill--an" style={{ width: `${anW}%` }} />
+        </div>
+        <div className="battleBarLabels">
+          {hasData ? (
+            <>
+              <span>{ipSig} iPhone signal</span>
+              <span>{anSig} Android signal</span>
+            </>
+          ) : (
+            <span style={{ margin: "0 auto" }}>Search to start the battle</span>
+          )}
+        </div>
+      </div>
+
+      <div className="battleSide battleSide--an">
+        <div className="battleEmoji">🤖</div>
+        <div className="battleName">Android</div>
+        {anPosRate != null ? (
+          <>
+            <div className="battlePct">{anPosRate}%</div>
+            <div className="battleSub">positive sentiment</div>
+          </>
+        ) : (
+          <div className="battleSub">no data yet</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -379,6 +631,8 @@ export default function App() {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadPhase, setLoadPhase] = useState("");
+  const [lastRefreshed, setLastRefreshed] = useState(null);
 
   async function checkHealth() {
     try {
@@ -391,67 +645,89 @@ export default function App() {
     }
   }
 
-  // FIXED: Search now ingests from YouTube using the search text, then loads /recent
   async function load({ silent = false } = {}) {
     if (!silent) setErr("");
     setLoading(true);
 
-    await checkHealth();
-
     const qText = query.trim();
 
     try {
-      // If user typed something, trigger ingestion for that query
       if (qText) {
+        setLoadPhase("Ingesting from YouTube…");
         await ingestYouTube({
           topic: topic || "demo",
           query: qText,
           max_videos: 5,
           comments_per_video: 500,
         });
-
-        // give the queue worker a moment, then poll a couple times
-        await sleep(1200);
+        await sleep(600);
       }
 
-      // poll up to 4 times to let queue populate SQL
+      setLoadPhase("Loading data…");
+
+      // After a fresh ingest, don't stop on pre-existing rows — keep polling
+      // until we see NEW data (rows scored after ingest started) or exhaust attempts.
+      const ingestStart = qText ? Date.now() - 2000 : null;
       let data = [];
-      for (let attempt = 0; attempt < 4; attempt++) {
-       data = await fetchRecent({
-       topic: topic || undefined,
-       limit,
-       q: qText || undefined,
-       device: deviceFilter !== "any" ? deviceFilter : undefined,
-       backfill: true,              // ✅ tell backend to rescore legacy rows
-       min_margin: MIN_MARGIN,      // ✅ keep UI+API consistent
-    });
 
-        if (Array.isArray(data) && data.length > 0) break;
-        await sleep(900);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          setLoadPhase(`Waiting for scoring… (${attempt}/4)`);
+          await sleep(800);
+        }
+
+        data = await fetchRecent({
+          topic: topic || undefined,
+          limit,
+          q: qText || undefined,
+          device: deviceFilter !== "any" ? deviceFilter : undefined,
+          backfill: attempt === 0,
+          min_margin: MIN_MARGIN,
+        });
+
+        if (!Array.isArray(data)) { data = []; break; }
+
+        // If we did not ingest, any rows are fine
+        if (!ingestStart) { if (data.length > 0) break; continue; }
+
+        // If we did ingest, look for at least one row scored after ingest started
+        const hasNew = data.some((r) => {
+          const t = r?.scored_at ? new Date(r.scored_at).getTime() : 0;
+          return t >= ingestStart;
+        });
+        if (hasNew) break;
       }
 
-      setRows(Array.isArray(data) ? data : []);
+      setRows(data);
+      setLastRefreshed(new Date());
+      setApiStatus("online");
+      setLastCheck(new Date());
     } catch (e) {
       if (!silent) setErr(e?.message || "Request failed");
+      setApiStatus("offline");
+      setLastCheck(new Date());
       setRows([]);
     } finally {
       setLoading(false);
+      setLoadPhase("");
     }
   }
 
   useEffect(() => {
-    (async () => {
-      await checkHealth();
-      try {
-        const t = await fetchTopics({ limit: 200 });
-        setTopics(t);
-      } catch {
-        setTopics(["demo", "iphone_vs_android"]);
-      }
-      await load({ silent: true });
-    })();
+    checkHealth();
+    Promise.all([
+      fetchTopics({ limit: 200 }).then(setTopics).catch(() => setTopics(["demo", "iphone_vs_android"])),
+      load({ silent: true }),
+    ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!rows.length) return;
+    const timer = setTimeout(() => load({ silent: true }), 5 * 60 * 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.length]);
 
   const buckets = useMemo(() => {
     const iphone = [];
@@ -470,8 +746,9 @@ export default function App() {
     return { iphone, android, both, neither };
   }, [rows]);
 
-  const sumIphone = useMemo(() => summarizeSignal(buckets.iphone), [buckets.iphone]);
-  const sumAndroid = useMemo(() => summarizeSignal(buckets.android), [buckets.android]);
+  // "both" posts mention iPhone AND Android — count them for each side
+  const sumIphone = useMemo(() => summarizeSignal([...buckets.iphone, ...buckets.both]), [buckets.iphone, buckets.both]);
+  const sumAndroid = useMemo(() => summarizeSignal([...buckets.android, ...buckets.both]), [buckets.android, buckets.both]);
   const overall = useMemo(() => summarizeMix(rows), [rows]);
 
   const coverage = useMemo(() => {
@@ -482,7 +759,8 @@ export default function App() {
   const ipWilson = useMemo(() => wilsonInterval(sumIphone.pos, sumIphone.neg), [sumIphone.pos, sumIphone.neg]);
   const anWilson = useMemo(() => wilsonInterval(sumAndroid.pos, sumAndroid.neg), [sumAndroid.pos, sumAndroid.neg]);
 
-  const MIN_EFFECTIVE_SIGNAL = 25;
+  // Scale threshold with data — require at least 5, up to 25
+  const MIN_EFFECTIVE_SIGNAL = Math.max(5, Math.min(25, Math.floor(rows.length * 0.05)));
 
   const decision = useMemo(() => {
     const ipSig = sumIphone.signal;
@@ -561,14 +839,18 @@ export default function App() {
     return {
       granularity,
       series: [
-        buildSeries("iPhone", buckets.iphone, "pos"),
-        buildSeries("Android", buckets.android, "neg"),
+        buildSeries("iPhone", [...buckets.iphone, ...buckets.both], "pos"),
+        buildSeries("Android", [...buckets.android, ...buckets.both], "neg"),
       ],
     };
-  }, [rows, buckets.iphone, buckets.android]);
+  }, [rows, buckets.iphone, buckets.android, buckets.both]);
 
-  const iphoneTerms = useMemo(() => topTerms(buckets.iphone, 10), [buckets.iphone]);
-  const androidTerms = useMemo(() => topTerms(buckets.android, 10), [buckets.android]);
+  const iphoneTerms = useMemo(() => topTermsWithSentiment([...buckets.iphone, ...buckets.both], 10), [buckets.iphone, buckets.both]);
+  const androidTerms = useMemo(() => topTermsWithSentiment([...buckets.android, ...buckets.both], 10), [buckets.android, buckets.both]);
+
+  const refreshedAgo = useRelativeTime(lastRefreshed);
+  const ipCountUp = useCountUp(sumIphone.total);
+  const anCountUp = useCountUp(sumAndroid.total);
 
   const heroText = useMemo(() => {
     if (!overall.total) return "No data yet — click Search to load scored posts.";
@@ -582,18 +864,49 @@ export default function App() {
     return `${decision.label} is trending more positive with higher confidence. Coverage: ${cov} of rows mention iPhone/Android (or both).`;
   }, [overall.total, coverage, decision.label]);
 
+  const ipPosRate = sumIphone.signal > 0 ? sumIphone.pos / sumIphone.signal : null;
+  const anPosRate = sumAndroid.signal > 0 ? sumAndroid.pos / sumAndroid.signal : null;
+
+  function signalArrow(netSig) {
+    if (netSig == null) return { cls: "sigArrow--flat", char: "→" };
+    if (netSig > 0.08) return { cls: "sigArrow--up", char: "↑" };
+    if (netSig < -0.08) return { cls: "sigArrow--down", char: "↓" };
+    return { cls: "sigArrow--flat", char: "→" };
+  }
+
+  const ipArrow = signalArrow(sumIphone.netSignal);
+  const anArrow = signalArrow(sumAndroid.netSignal);
+
   return (
     <div className="page">
+      {loading && <div className="loadBar" />}
+
       <header className="topbar">
         <div className="brand">
-          <div className="logo" />
+          <div className="logoIcon">📊</div>
           <div>
-            <div className="title">Sentiment Analysis Dashboard</div>
-            <div className="subtitle">Azure Functions • Azure AI Language • SQL</div>
+            <div className="title">SentimentIQ</div>
+            <div className="subtitle">iPhone vs Android · YouTube · Azure AI</div>
           </div>
         </div>
-        <div className="actions" />
+        <div className="topbarRight">
+          {rows.length > 0 && !loading && (
+            <div className="liveBadge">
+              <span className="livePulse" />
+              Live
+            </div>
+          )}
+          {refreshedAgo && (
+            <span className="refreshChip">Updated {refreshedAgo}</span>
+          )}
+          <div className="statusChip">
+            <span className="statusDot" data-status={apiStatus} />
+            <span style={{ textTransform: "capitalize" }}>{apiStatus}</span>
+          </div>
+        </div>
       </header>
+
+      <BattleBanner sumIphone={sumIphone} sumAndroid={sumAndroid} decision={decision} loading={loading} />
 
       <main className="grid">
         <section className="card area-filters">
@@ -650,27 +963,17 @@ export default function App() {
               <div className="field field--btn">
                 <label>&nbsp;</label>
                 <button className="btn btn--primary" onClick={() => load()} disabled={loading}>
-                  {loading ? "Searching…" : "Search"}
+                  {loading ? (loadPhase || "Searching…") : "Search"}
                 </button>
               </div>
             </div>
 
             <div className="filtersRow filtersRow--meta">
               <div className="pill metaPill">
-                <span style={{ fontWeight: 850 }}>Winner mode</span>
+                <span style={{ fontWeight: 700 }}>Winner mode</span>
                 <span className="dim" style={{ marginLeft: 8 }}>
-                  (Wilson confidence + signal fallback)
+                  Wilson confidence interval + signal fallback
                 </span>
-              </div>
-
-              <div className="pill metaPill metaPill--right" title={import.meta.env.VITE_API_BASE_URL}>
-                <span className="statusDot" data-status={apiStatus} aria-label={`backend ${apiStatus}`} />
-                <span style={{ fontWeight: 800, textTransform: "capitalize" }}>{apiStatus}</span>
-                {lastCheck && (
-                  <span style={{ marginLeft: 10, opacity: 0.72 }}>
-                    • checked {lastCheck.toLocaleTimeString()}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -686,49 +989,121 @@ export default function App() {
           )}
         </section>
 
-        <section className="card card--kpi area-kpi1">
+        <section className="card card--kpi area-kpi1 card--anim" style={{ animationDelay: "0ms" }}>
+          <span className="kpiAccentBar kpiAccentBar--ip" />
           <div className="cardTitle">iPhone</div>
           <div className="kpiRow">
-            <div>
-              <div className="statBig">{sumIphone.total}</div>
-              <div className="statSub">posts matched</div>
-            </div>
-            <div className="kpiMeta">Signal: {sumIphone.signal}</div>
+            {loading ? (
+              <>
+                <div><div className="skeleton skeleton--stat" /><div className="skeleton skeleton--sub" /></div>
+                <div className="skeleton skeleton--meta" />
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="statBig">{ipCountUp.toLocaleString()}</div>
+                  <div className="statSub">posts · {sumIphone.signal} signal</div>
+                  <div className="kpiRate">
+                    <span className={`sigArrow ${ipArrow.cls}`}>{ipArrow.char}</span>
+                    {ipPosRate != null && (
+                      <span className={`posRate posRate--${ipPosRate > 0.5 ? "pos" : ipPosRate < 0.45 ? "neg" : "neu"}`}>
+                        {Math.round(ipPosRate * 100)}% pos
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: 20 }}>🍎</div>
+              </>
+            )}
           </div>
         </section>
 
-        <section className="card card--kpi area-kpi2">
+        <section className="card card--kpi area-kpi2 card--anim" style={{ animationDelay: "60ms" }}>
+          <span className="kpiAccentBar kpiAccentBar--an" />
           <div className="cardTitle">Android</div>
           <div className="kpiRow">
-            <div>
-              <div className="statBig">{sumAndroid.total}</div>
-              <div className="statSub">posts matched</div>
-            </div>
-            <div className="kpiMeta">Signal: {sumAndroid.signal}</div>
+            {loading ? (
+              <>
+                <div><div className="skeleton skeleton--stat" /><div className="skeleton skeleton--sub" /></div>
+                <div className="skeleton skeleton--meta" />
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="statBig">{anCountUp.toLocaleString()}</div>
+                  <div className="statSub">posts · {sumAndroid.signal} signal</div>
+                  <div className="kpiRate">
+                    <span className={`sigArrow ${anArrow.cls}`}>{anArrow.char}</span>
+                    {anPosRate != null && (
+                      <span className={`posRate posRate--${anPosRate > 0.5 ? "pos" : anPosRate < 0.45 ? "neg" : "neu"}`}>
+                        {Math.round(anPosRate * 100)}% pos
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: 20 }}>🤖</div>
+              </>
+            )}
           </div>
         </section>
 
-        <section className="card card--kpi area-kpi3">
+        <section className="card card--kpi area-kpi3 card--anim" style={{ animationDelay: "120ms" }}>
+          <span className="kpiAccentBar kpiAccentBar--win" />
           <div className="cardTitle">Who’s Winning</div>
           <div className="kpiRow">
-            <div>
-              <div className="statBig" style={{ fontSize: 26 }}>{decision.label}</div>
-              <div className="statSub">{decision.detail}</div>
-            </div>
-            <div className="kpiMeta">{fmtPct(Math.abs(netDiff))}</div>
+            {loading ? (
+              <>
+                <div><div className="skeleton skeleton--stat" style={{ width: 110, height: 26 }} /><div className="skeleton skeleton--sub" /></div>
+                <div className="skeleton skeleton--meta" />
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="statBig statBig--winner" style={{
+                    color: decision.label === "iPhone" ? "var(--ip-color)"
+                         : decision.label === "Android" ? "var(--an-color)"
+                         : "var(--text)"
+                  }}>
+                    {decision.label === "iPhone" ? "🍎 iPhone"
+                   : decision.label === "Android" ? "🤖 Android"
+                   : decision.label === "Even" ? "🤝 Even"
+                   : decision.label}
+                  </div>
+                  <div className="statSub">{decision.detail}</div>
+                  {decision.confidence != null && (
+                    <div className="kpiRate">
+                      <span className="posRate posRate--pos">{fmtPct(decision.confidence)} conf.</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </section>
 
-        <section className="card card--kpi area-kpi4">
+        <section className="card card--kpi area-kpi4 card--anim" style={{ animationDelay: "180ms" }}>
+          <span className="kpiAccentBar kpiAccentBar--cov" />
           <div className="cardTitle">Coverage</div>
           <div className="kpiRow">
-            <div>
-              <div className="statBig" style={{ fontSize: 30 }}>
-                {coverage == null ? "—" : `${Math.round(coverage * 100)}%`}
-              </div>
-              <div className="statSub">mentions iPhone/Android (or both)</div>
-            </div>
-            <div className="kpiMeta">Both: {buckets.both.length}</div>
+            {loading ? (
+              <>
+                <div><div className="skeleton skeleton--stat" style={{ width: 70, height: 30 }} /><div className="skeleton skeleton--sub" /></div>
+                <div className="skeleton skeleton--meta" />
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="statBig" style={{ fontSize: 32 }}>
+                    {coverage == null ? "—" : `${Math.round(coverage * 100)}%`}
+                  </div>
+                  <div className="statSub">mention iPhone or Android</div>
+                  <div className="kpiRate">
+                    <span className="posRate posRate--neu">{buckets.both.length} mention both</span>
+                  </div>
+                </div>
+                <div className="kpiMeta">{overall.total.toLocaleString()} total</div>
+              </>
+            )}
           </div>
         </section>
 
@@ -736,9 +1111,39 @@ export default function App() {
           <div className="cardTitle">Insights</div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 18, fontWeight: 950, letterSpacing: "-0.01em" }}>
-              {heroText}
-            </div>
+            {loading && !overall.total ? (
+              <div className="dim" style={{ fontStyle: "italic", fontSize: 14 }}>Fetching latest data…</div>
+            ) : !overall.total ? (
+              <div className="onboardHero">
+                <div className="onboardBattle">
+                  <div className="onboardBattleSide">
+                    <div className="onboardBattleEmoji">🍎</div>
+                    <div className="onboardBattleLabel onboardBattleLabel--ip">iPhone</div>
+                  </div>
+                  <div className="onboardVs">VS</div>
+                  <div className="onboardBattleSide">
+                    <div className="onboardBattleEmoji">🤖</div>
+                    <div className="onboardBattleLabel onboardBattleLabel--an">Android</div>
+                  </div>
+                </div>
+                <div className="onboardSteps">
+                  <div className="onboardStep">
+                    <div className="onboardStepNum">1</div>
+                    <div className="onboardStepText"><strong>Enter a topic</strong> — try "iPhone 16 review" or "Samsung Galaxy S25"</div>
+                  </div>
+                  <div className="onboardStep">
+                    <div className="onboardStepNum">2</div>
+                    <div className="onboardStepText"><strong>We fetch YouTube comments</strong> using the Azure backend and score them with Azure AI Language</div>
+                  </div>
+                  <div className="onboardStep">
+                    <div className="onboardStepNum">3</div>
+                    <div className="onboardStepText"><strong>See who wins</strong> — real positive/negative sentiment from real users, not reviews</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="heroHeadline">{heroText}</div>
+            )}
 
             <TrendChart series={trend.series} granularity={trend.granularity} />
 
@@ -747,8 +1152,8 @@ export default function App() {
                 <div className="compareTitle">Top iPhone terms</div>
                 <div className="termWrap">
                   {iphoneTerms.length ? (
-                    iphoneTerms.map(([w, c]) => (
-                      <span key={`ip-${w}`} className="termPill" title={`${c} mentions`}>
+                    iphoneTerms.map(([w, c, tone]) => (
+                      <span key={`ip-${w}`} className={`termPill termPill--${tone}`} title={`${c} mentions · sentiment: ${tone}`}>
                         {w} <span className="termCount">{c}</span>
                       </span>
                     ))
@@ -762,8 +1167,8 @@ export default function App() {
                 <div className="compareTitle">Top Android terms</div>
                 <div className="termWrap">
                   {androidTerms.length ? (
-                    androidTerms.map(([w, c]) => (
-                      <span key={`an-${w}`} className="termPill" title={`${c} mentions`}>
+                    androidTerms.map(([w, c, tone]) => (
+                      <span key={`an-${w}`} className={`termPill termPill--${tone}`} title={`${c} mentions · sentiment: ${tone}`}>
                         {w} <span className="termCount">{c}</span>
                       </span>
                     ))
@@ -785,31 +1190,77 @@ export default function App() {
         </section>
 
         <section className="card area-side">
-          <div className="cardTitle">Signal Mix (pos/neg drive winner)</div>
+          <div className="cardTitle">Signal Mix</div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="sideCompareRow">
-              <div className="sideCompareName">iPhone</div>
-              <div className="sideCompareBadges">
-                <span className="badge badge--pos">Pos {sumIphone.pos}</span>
-                <span className="badge badge--neg">Neg {sumIphone.neg}</span>
-                <span className="badge badge--neu">Neu {sumIphone.neu}</span>
+            <div className="signalBlock">
+              <div className="signalBlockName signalBlockName--ip">🍎 iPhone</div>
+              <div className="signalBars">
+                <div className="signalBarRow">
+                  <span className="signalBarLabel">Pos</span>
+                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--pos" style={{ width: sumIphone.total ? `${sumIphone.pos / sumIphone.total * 100}%` : "0%" }} /></div>
+                  <span className="signalBarCount">{sumIphone.pos}</span>
+                </div>
+                <div className="signalBarRow">
+                  <span className="signalBarLabel">Neu</span>
+                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neu" style={{ width: sumIphone.total ? `${sumIphone.neu / sumIphone.total * 100}%` : "0%" }} /></div>
+                  <span className="signalBarCount">{sumIphone.neu}</span>
+                </div>
+                <div className="signalBarRow">
+                  <span className="signalBarLabel">Neg</span>
+                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neg" style={{ width: sumIphone.total ? `${sumIphone.neg / sumIphone.total * 100}%` : "0%" }} /></div>
+                  <span className="signalBarCount">{sumIphone.neg}</span>
+                </div>
               </div>
             </div>
 
-            <div className="sideCompareRow">
-              <div className="sideCompareName">Android</div>
-              <div className="sideCompareBadges">
-                <span className="badge badge--pos">Pos {sumAndroid.pos}</span>
-                <span className="badge badge--neg">Neg {sumAndroid.neg}</span>
-                <span className="badge badge--neu">Neu {sumAndroid.neu}</span>
+            <div className="signalBlock">
+              <div className="signalBlockName signalBlockName--an">🤖 Android</div>
+              <div className="signalBars">
+                <div className="signalBarRow">
+                  <span className="signalBarLabel">Pos</span>
+                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--pos" style={{ width: sumAndroid.total ? `${sumAndroid.pos / sumAndroid.total * 100}%` : "0%" }} /></div>
+                  <span className="signalBarCount">{sumAndroid.pos}</span>
+                </div>
+                <div className="signalBarRow">
+                  <span className="signalBarLabel">Neu</span>
+                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neu" style={{ width: sumAndroid.total ? `${sumAndroid.neu / sumAndroid.total * 100}%` : "0%" }} /></div>
+                  <span className="signalBarCount">{sumAndroid.neu}</span>
+                </div>
+                <div className="signalBarRow">
+                  <span className="signalBarLabel">Neg</span>
+                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neg" style={{ width: sumAndroid.total ? `${sumAndroid.neg / sumAndroid.total * 100}%` : "0%" }} /></div>
+                  <span className="signalBarCount">{sumAndroid.neg}</span>
+                </div>
               </div>
             </div>
 
             <div className="footerHint" style={{ marginTop: 4 }}>
-              Tip: “Signal” is pos+neg after confidence gating. Neutrals don’t decide winners.
+              Signal = pos + neg after confidence gating. Neutrals don’t decide winners.
             </div>
           </div>
+        </section>
+
+        <section className="card area-ipie">
+          <div className="cardTitle">iPhone · Sentiment breakdown</div>
+          {loading ? (
+            <div className="donutSkeletonWrap">
+              <div className="skeleton" style={{ width: 160, height: 160, borderRadius: "50%" }} />
+            </div>
+          ) : (
+            <DonutChart label="iPhone" pos={sumIphone.pos} neu={sumIphone.neu} neg={sumIphone.neg} />
+          )}
+        </section>
+
+        <section className="card area-apie">
+          <div className="cardTitle">Android · Sentiment breakdown</div>
+          {loading ? (
+            <div className="donutSkeletonWrap">
+              <div className="skeleton" style={{ width: 160, height: 160, borderRadius: "50%" }} />
+            </div>
+          ) : (
+            <DonutChart label="Android" pos={sumAndroid.pos} neu={sumAndroid.neu} neg={sumAndroid.neg} />
+          )}
         </section>
 
         <section className="card area-table">
@@ -838,7 +1289,7 @@ export default function App() {
                   const key = r?._id || `${r?.platform || "p"}-${r?.scored_at || "t"}-${idx}`;
 
                   return (
-                    <tr key={key}>
+                    <tr key={key} className={`row--${stable}`}>
                       <td className="mono">{fmtTime(r.scored_at)}</td>
                       <td>{r.platform || ""}</td>
                       <td>{r.topic || ""}</td>
@@ -852,22 +1303,30 @@ export default function App() {
 
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan="7" className="empty">
-                      No rows found. Try increasing Limit or clearing filters.
+                    <td colSpan="7">
+                      <div className="emptyState">
+                        <div className="emptyStateIcon">📊</div>
+                        <div className="emptyStateText">No data yet</div>
+                        <div className="emptyStateSub">Enter a search query and click Search to pull YouTube comments</div>
+                      </div>
                     </td>
                   </tr>
                 )}
 
                 {loading && (
                   <tr>
-                    <td colSpan="7" className="empty">Loading…</td>
+                    <td colSpan="7">
+                      <div className="emptyState">
+                        <div className="emptyStateText" style={{ color: "var(--muted)" }}>{loadPhase || "Loading…"}</div>
+                      </div>
+                    </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
 
-          <div className="footerHint">Next upgrades: time range + export.</div>
+          <div className="footerHint">{overall.total.toLocaleString()} total rows loaded</div>
         </section>
       </main>
     </div>

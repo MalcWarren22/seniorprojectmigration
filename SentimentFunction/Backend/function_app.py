@@ -420,19 +420,70 @@ def ai_language_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dic
 # Fallback sentiment (lexicon) + Hybrid policy (fix "all neutral" issue)
 # ----------------------------
 _POS_WORDS = {
-    "love","like","liked","great","good","amazing","awesome","excellent","best","better",
-    "perfect","nice","solid","fantastic","wonderful","happy","favorite","smooth","fast",
-    "improved","improvement","recommend","recommended","worth","wins","winning"
+    # Core positive
+    "love","loved","like","liked","enjoy","enjoyed","enjoys",
+    "great","good","amazing","awesome","excellent","best","better","brilliant",
+    "perfect","nice","solid","fantastic","wonderful","superb","outstanding",
+    "impressive","incredible","unbelievable","insane","phenomenal","exceptional",
+    # Feel / experience
+    "happy","satisfied","pleased","glad","thrilled","excited","stoked",
+    "favorite","favourite","clean","elegant","beautiful","gorgeous","stunning",
+    # Performance
+    "smooth","fast","quick","snappy","speedy","fluid","responsive","reliable",
+    "stable","powerful","efficient","seamless","flawless","crisp",
+    # Value
+    "worth","worthwhile","affordable","value","deal","recommend","recommended",
+    # Improvement
+    "improved","improvement","upgraded","upgrade","fixed","works","working",
+    # Winning
+    "wins","winning","winner","leads","ahead","dominates","superior","top",
+    # Modern slang
+    "fire","goated","banger","peak","clutch","based","slaps","bussin","lowkey",
+    # Tech-specific positives
+    "innovative","intuitive","premium","polished","refined","versatile","ecosystem",
 }
 _NEG_WORDS = {
-    "hate","dislike","bad","terrible","awful","worst","worse","trash","garbage","bug","bugs",
-    "broken","break","fails","failed","slow","lag","laggy","overheat","overheating","hot",
-    "crash","crashes","crashing","problem","problems","issue","issues","sucks","suck",
-    "regret","annoying","ridiculous","unusable"
+    # Core negative
+    "hate","hated","hates","dislike","disliked","despise","loathe",
+    "bad","terrible","awful","worst","worse","horrible","dreadful","atrocious","abysmal",
+    "pathetic","disgusting","appalling",
+    # Quality
+    "trash","garbage","junk","rubbish","crap","worthless","useless","pointless",
+    "cheap","flimsy","fragile","plastic","toyish",
+    # Problems
+    "bug","bugs","buggy","glitch","glitchy","broken","break","breaking","fails",
+    "failed","failure","error","errors","corrupt","corrupted",
+    # Performance
+    "slow","lag","laggy","sluggish","choppy","stutters","stuttering","freezes",
+    "frozen","clunky","heavy","bloat","bloatware",
+    # Heat / hardware
+    "overheat","overheating","overheated","hot","burning","throttle","throttling",
+    # Crashes
+    "crash","crashes","crashing","crashed","restart","reboots","bricked","dead",
+    # Issues
+    "problem","problems","issue","issues","flaw","flaws","defect","defects",
+    # Annoyance
+    "sucks","suck","annoying","frustrating","frustration","infuriating","painful",
+    "ridiculous","absurd","stupid","idiotic","embarrassing",
+    # Unusable
+    "unusable","unacceptable","unreliable","unstable","inconsistent",
+    # Value
+    "expensive","overpriced","ripoff","rip-off","scam","waste","regret","regrets",
+    # Disappointment
+    "disappointed","disappointing","underwhelming","mediocre","forgettable","meh",
+    # Modern slang
+    "mid","trash","nah","nahhh","bruh","smh","yikes",
+    # Tech-specific
+    "outdated","obsolete","limited","locked","restricted","proprietary",
 }
 _NEGATORS = {
     "not","no","never","dont","don't","didnt","didn't","isnt","isn't","wasnt","wasn't",
-    "cant","can't","won't","wont"
+    "cant","can't","won't","wont","hardly","barely","scarcely","neither","nor",
+    "nobody","nothing","nowhere","noone","without","lack","lacks","lacking",
+}
+_INTENSIFIERS = {
+    "very","really","so","extremely","absolutely","incredibly","totally","completely",
+    "super","ultra","genuinely","truly","seriously","literally","way","much","far",
 }
 
 def _tokenize_basic(text: str) -> List[str]:
@@ -444,22 +495,25 @@ def lexicon_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[st
     if not tokens:
         return "neutral", {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
 
-    pos = 0
-    neg = 0
+    pos = 0.0
+    neg = 0.0
     for i, w in enumerate(tokens):
         prev = tokens[i - 1] if i > 0 else ""
-        negated = prev in _NEGATORS
+        prev2 = tokens[i - 2] if i > 1 else ""
+        negated = (prev in _NEGATORS) or (prev2 in _NEGATORS)
+        intensified = (prev in _INTENSIFIERS) or (prev2 in _INTENSIFIERS and prev not in _NEGATORS)
+        weight = 1.5 if intensified else 1.0
 
         if w in _POS_WORDS:
             if negated:
-                neg += 1
+                neg += weight
             else:
-                pos += 1
+                pos += weight
         elif w in _NEG_WORDS:
             if negated:
-                pos += 1
+                pos += weight
             else:
-                neg += 1
+                neg += weight
 
     total = pos + neg
     if total == 0:
@@ -482,7 +536,7 @@ def _azure_is_dead_neutral(scores: Dict[str, float]) -> bool:
     p = float(scores.get("positive") or 0.0)
     neu = float(scores.get("neutral") or 0.0)
     n = float(scores.get("negative") or 0.0)
-    return (neu >= 0.985) and (p <= 0.01) and (n <= 0.01)
+    return (neu >= 0.92) and (p <= 0.04) and (n <= 0.04)
 
 def hybrid_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[str, float]]:
     """
