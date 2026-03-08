@@ -87,7 +87,9 @@ resource "azurerm_linux_function_app" "this" {
   AI_LANGUAGE_KEY = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/${var.ai_language_key_secret_name}/)"
   SQLCON = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/${var.sqlcon_secret_name}/)"
   YOUTUBE_API_KEY      = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/youtube-api-key)"
-
+  TWITTER_ACCESS_TOKEN = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-access-token)"
+  TWITTER_ACCESS_TOKEN_SECRET = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-access-token-secret)"
+  TWITTER_BEARER_TOKEN = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-bearer-token)"
 
   APPLICATIONINSIGHTS_CONNECTION_STRING = var.app_insights_connection_string
   FUNCTIONS_WORKER_RUNTIME              = "python"

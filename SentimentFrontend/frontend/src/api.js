@@ -1,7 +1,7 @@
 // src/api.js
 const API = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, ""); // trim trailing slash
 
-// ✅ This is what App.jsx is importing: { apiUrl, fetchRecent, fetchTopics, ingestYouTube }
+// This is what App.jsx is importing: { apiUrl, fetchRecent, fetchTopics, ingestYouTube, ingestTwitter }
 export function apiUrl(path = "") {
   const p = String(path || "");
   if (!p) return API;
@@ -80,6 +80,22 @@ export async function ingestYouTube({
       max_videos,
       comments_per_video,
       videoId,
+    }),
+  });
+}
+
+export async function ingestTwitter({
+  topic,
+  query,
+  max_results = 100,
+} = {}) {
+  return httpJson(apiUrl("/ingest/twitter"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      topic,
+      query,
+      max_results,
     }),
   });
 }

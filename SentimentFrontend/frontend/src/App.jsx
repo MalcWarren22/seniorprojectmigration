@@ -1,6 +1,6 @@
 // src/App.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchRecent, fetchTopics, apiUrl, ingestYouTube } from "./api";
+import { fetchRecent, fetchTopics, apiUrl, ingestYouTube, ingestTwitter } from "./api";
 
 /* ----------------------------
    UI bits
@@ -534,6 +534,21 @@ function DonutChart({ label, pos, neu, neg }) {
   );
 }
 
+function getPageNums(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total]);
+  for (let i = Math.max(1, current - 1); i <= Math.min(total, current + 1); i++) pages.add(i);
+  const sorted = [...pages].sort((a, b) => a - b);
+  const result = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (p - prev > 1) result.push("...");
+    result.push(p);
+    prev = p;
+  }
+  return result;
+}
+
 /* ----------------------------
    Battle Banner
 ---------------------------- */
@@ -627,12 +642,17 @@ export default function App() {
   const [limit, setLimit] = useState(2000);
   const [query, setQuery] = useState("");
   const [deviceFilter, setDeviceFilter] = useState("any");
+  const [source, setSource] = useState("youtube");
 
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadPhase, setLoadPhase] = useState("");
   const [lastRefreshed, setLastRefreshed] = useState(null);
+
+  const [tablePage, setTablePage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [sentFilter, setSentFilter] = useState("all");
 
   async function checkHealth() {
     try {
@@ -645,21 +665,32 @@ export default function App() {
     }
   }
 
-  async function load({ silent = false } = {}) {
+  async function load({ silent = false, dbOnly = false } = {}) {
     if (!silent) setErr("");
     setLoading(true);
 
     const qText = query.trim();
+    const doIngest = Boolean(qText) && !dbOnly;
 
     try {
-      if (qText) {
-        setLoadPhase("Ingesting from YouTube…");
-        await ingestYouTube({
-          topic: topic || "demo",
-          query: qText,
-          max_videos: 5,
-          comments_per_video: 500,
-        });
+      if (doIngest) {
+        if (source === "youtube" || source === "both") {
+          setLoadPhase("Ingesting from YouTube…");
+          await ingestYouTube({
+            topic: topic || "demo",
+            query: qText,
+            max_videos: 5,
+            comments_per_video: 500,
+          });
+        }
+        if (source === "twitter" || source === "both") {
+          setLoadPhase("Ingesting from X / Twitter…");
+          await ingestTwitter({
+            topic: topic || "demo",
+            query: qText,
+            max_results: 100,
+          });
+        }
         await sleep(600);
       }
 
@@ -667,7 +698,7 @@ export default function App() {
 
       // After a fresh ingest, don't stop on pre-existing rows — keep polling
       // until we see NEW data (rows scored after ingest started) or exhaust attempts.
-      const ingestStart = qText ? Date.now() - 2000 : null;
+      const ingestStart = doIngest ? Date.now() - 2000 : null;
       let data = [];
 
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -877,6 +908,17 @@ export default function App() {
   const ipArrow = signalArrow(sumIphone.netSignal);
   const anArrow = signalArrow(sumAndroid.netSignal);
 
+  const filteredRows = useMemo(() => {
+    if (sentFilter === "all") return rows;
+    return rows.filter(r => stableLabelFromScores(getScores(r)) === sentFilter);
+  }, [rows, sentFilter]);
+
+  useEffect(() => { setTablePage(1); }, [rows, sentFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const safePage = Math.min(tablePage, pageCount);
+  const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   return (
     <div className="page">
       {loading && <div className="loadBar" />}
@@ -886,7 +928,7 @@ export default function App() {
           <div className="logoIcon">📊</div>
           <div>
             <div className="title">SentimentIQ</div>
-            <div className="subtitle">iPhone vs Android · YouTube · Azure AI</div>
+            <div className="subtitle">iPhone vs Android · YouTube · X · Azure AI</div>
           </div>
         </div>
         <div className="topbarRight">
@@ -960,11 +1002,73 @@ export default function App() {
                 </select>
               </div>
 
+              <div className="field field--source">
+                <label>Source</label>
+                <div className="sourcePills">
+                  <button
+                    className={`sourcePill${source === "youtube" ? " sourcePill--active sourcePill--yt" : ""}`}
+                    onClick={() => setSource("youtube")}
+                    title="Pull from YouTube comments"
+                  >
+                    ▶ YouTube
+                  </button>
+                  <button
+                    className={`sourcePill${source === "twitter" ? " sourcePill--active sourcePill--x" : ""}`}
+                    onClick={() => setSource("twitter")}
+                    title="Pull from X / Twitter"
+                  >
+                    𝕏 Twitter
+                  </button>
+                  <button
+                    className={`sourcePill${source === "both" ? " sourcePill--active sourcePill--both" : ""}`}
+                    onClick={() => setSource("both")}
+                    title="Pull from both sources"
+                  >
+                    Both
+                  </button>
+                </div>
+              </div>
+
               <div className="field field--btn">
                 <label>&nbsp;</label>
-                <button className="btn btn--primary" onClick={() => load()} disabled={loading}>
-                  {loading ? (loadPhase || "Searching…") : "Search"}
-                </button>
+                <div className="btnGroup">
+                  {query.trim() ? (
+                    <>
+                      <button
+                        className="btn btn--ghost"
+                        onClick={() => load({ dbOnly: true })}
+                        disabled={loading}
+                        title="Read from your database — no API calls"
+                      >
+                        Load from DB
+                      </button>
+                      <button
+                        className={`btn btn--primary${source === "twitter" ? " btn--twitter" : source === "both" ? "" : " btn--youtube"}`}
+                        onClick={() => load()}
+                        disabled={loading}
+                        title={
+                          source === "youtube" ? "Fetch from YouTube (uses quota)"
+                          : source === "twitter" ? "Fetch from X / Twitter (uses credit)"
+                          : "Fetch from YouTube + X (uses both quotas)"
+                        }
+                      >
+                        {loading
+                          ? (loadPhase || "Searching…")
+                          : source === "youtube" ? "Search YouTube"
+                          : source === "twitter" ? "Search X"
+                          : "Search Both"}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn--primary"
+                      onClick={() => load()}
+                      disabled={loading}
+                    >
+                      {loading ? (loadPhase || "Loading…") : "Refresh"}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1264,7 +1368,32 @@ export default function App() {
         </section>
 
         <section className="card area-table">
-          <div className="cardTitle">Recent Scored Posts</div>
+          <div className="tableHeader">
+            <div className="cardTitle" style={{ marginBottom: 0 }}>Recent Scored Posts</div>
+            <div className="tableToolbar">
+              <div className="sentFilterPills">
+                {[["all","All"],["positive","Positive"],["neutral","Neutral"],["negative","Negative"]].map(([v, label]) => (
+                  <button
+                    key={v}
+                    className={`sentPill sentPill--${v}${sentFilter === v ? " sentPill--active" : ""}`}
+                    onClick={() => setSentFilter(v)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <select
+                className="pageSizeSelect"
+                value={pageSize}
+                onChange={e => { setPageSize(Number(e.target.value)); setTablePage(1); }}
+              >
+                <option value={10}>10 / page</option>
+                <option value={25}>25 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
+            </div>
+          </div>
 
           <div className="tableWrap">
             <table className="table">
@@ -1281,25 +1410,44 @@ export default function App() {
               </thead>
 
               <tbody>
-                {rows.map((r, idx) => {
+                {pageRows.map((r, idx) => {
                   const s = getScores(r);
                   const stable = stableLabelFromScores(s);
-                  const scoreStr = `P:${fmt(s.positive)}  Neu:${fmt(s.neutral)}  Neg:${fmt(s.negative)}`;
-
                   const key = r?._id || `${r?.platform || "p"}-${r?.scored_at || "t"}-${idx}`;
-
                   return (
                     <tr key={key} className={`row--${stable}`}>
                       <td className="mono">{fmtTime(r.scored_at)}</td>
-                      <td>{r.platform || ""}</td>
+                      <td>
+                        {r.platform === "twitter"
+                          ? <span className="platformBadge platformBadge--x">𝕏</span>
+                          : r.platform === "youtube"
+                          ? <span className="platformBadge platformBadge--yt">▶</span>
+                          : <span className="platformBadge">{r.platform || "—"}</span>}
+                      </td>
                       <td>{r.topic || ""}</td>
                       <td className="dim">{labelForBucket(classifyDevice(r?.clean_text || ""))}</td>
                       <td><Badge label={stable} /></td>
-                      <td className="mono dim">{scoreStr}</td>
+                      <td className="scoreCell">
+                        <span className="scoreVal scoreVal--pos">P:{fmt(s.positive)}</span>
+                        <span className="scoreVal scoreVal--neu">N:{fmt(s.neutral)}</span>
+                        <span className="scoreVal scoreVal--neg">-:{fmt(s.negative)}</span>
+                      </td>
                       <td className="textCell" title={r.clean_text || ""}>{r.clean_text || ""}</td>
                     </tr>
                   );
                 })}
+
+                {!loading && filteredRows.length === 0 && rows.length > 0 && (
+                  <tr>
+                    <td colSpan="7">
+                      <div className="emptyState">
+                        <div className="emptyStateIcon">🔍</div>
+                        <div className="emptyStateText">No {sentFilter} posts</div>
+                        <div className="emptyStateSub">Try a different sentiment filter</div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
 
                 {!loading && rows.length === 0 && (
                   <tr>
@@ -1326,7 +1474,40 @@ export default function App() {
             </table>
           </div>
 
-          <div className="footerHint">{overall.total.toLocaleString()} total rows loaded</div>
+          {filteredRows.length > 0 && (
+            <div className="tablePager">
+              <div className="tableInfo">
+                {sentFilter !== "all" && (
+                  <span className="tableFilterNote">{sentFilter} only · </span>
+                )}
+                Showing {((safePage - 1) * pageSize + 1).toLocaleString()}–{Math.min(safePage * pageSize, filteredRows.length).toLocaleString()} of {filteredRows.length.toLocaleString()}
+                {sentFilter !== "all" && rows.length !== filteredRows.length && (
+                  <span className="tableFilterNote"> ({rows.length.toLocaleString()} total)</span>
+                )}
+              </div>
+              <div className="pagerControls">
+                <button className="pagerBtn" onClick={() => setTablePage(1)} disabled={safePage === 1} title="First">«</button>
+                <button className="pagerBtn" onClick={() => setTablePage(p => p - 1)} disabled={safePage === 1} title="Previous">‹</button>
+                {getPageNums(safePage, pageCount).map((n, i) =>
+                  n === "..." ? (
+                    <span key={`dots-${i}`} className="pagerDots">…</span>
+                  ) : (
+                    <button
+                      key={n}
+                      className={`pagerBtn${n === safePage ? " pagerBtn--active" : ""}`}
+                      onClick={() => setTablePage(n)}
+                    >
+                      {n}
+                    </button>
+                  )
+                )}
+                <button className="pagerBtn" onClick={() => setTablePage(p => p + 1)} disabled={safePage === pageCount} title="Next">›</button>
+                <button className="pagerBtn" onClick={() => setTablePage(pageCount)} disabled={safePage === pageCount} title="Last">»</button>
+              </div>
+            </div>
+          )}
+
+          <div className="footerHint">{overall.total.toLocaleString()} total rows loaded · {pageCount} page{pageCount !== 1 ? "s" : ""}</div>
         </section>
       </main>
     </div>

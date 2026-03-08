@@ -34,6 +34,8 @@ DEFAULT_YT_QUERY = "iphone vs android"
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 
+TWITTER_MAX_RESULTS = 100   # X API v2 max per single request (Basic tier)
+
 MAX_TA_CHARS = 4500
 
 # Margin used ONLY for pos vs neg decisioning (neutral does NOT auto-win)
@@ -441,6 +443,16 @@ _POS_WORDS = {
     "fire","goated","banger","peak","clutch","based","slaps","bussin","lowkey",
     # Tech-specific positives
     "innovative","intuitive","premium","polished","refined","versatile","ecosystem",
+    # Camera / display quality
+    "sharp","vibrant","vivid","clear","detailed","accurate","natural","bright",
+    "colorful","colourful","lifelike","realistic","balanced","rich","punchy",
+    "dynamic","lush","brilliant",
+    # Battery / endurance
+    "lasts","lasting","endurance","longevity","durable","long-lasting","allday",
+    "allnight","reliable","charges","charged","charges fast","fast charge",
+    # Build / feel
+    "premium","sturdy","solid","satisfying","comfortable","lightweight","sleek",
+    "buttery","buttery smooth",
 }
 _NEG_WORDS = {
     # Core negative
@@ -475,6 +487,15 @@ _NEG_WORDS = {
     "mid","trash","nah","nahhh","bruh","smh","yikes",
     # Tech-specific
     "outdated","obsolete","limited","locked","restricted","proprietary",
+    # Camera / display negatives
+    "blurry","blurred","grainy","muddy","washed","washed-out","overexposed",
+    "underexposed","noisy","noise","artifacting","oversharpened","distorted",
+    "pixelated","dull","dim","lifeless","inaccurate","oversaturated","ugly",
+    # Battery / charging negatives
+    "drains","draining","drained","dies","dying","depletes","dwindles",
+    "short","shortlived","unreliable","inconsistent","weak",
+    # Overrated / hype
+    "overrated","overhyped","gimmick","gimmicky","pointless","unnecessary",
 }
 _NEGATORS = {
     "not","no","never","dont","don't","didnt","didn't","isnt","isn't","wasnt","wasn't",
@@ -538,18 +559,46 @@ def _azure_is_dead_neutral(scores: Dict[str, float]) -> bool:
     n = float(scores.get("negative") or 0.0)
     return (neu >= 0.92) and (p <= 0.04) and (n <= 0.04)
 
+def _azure_is_tied(scores: Dict[str, float]) -> bool:
+    """Azure returned pos ≈ neg (exact or near-tie from 0.25-step rounding)."""
+    p = float(scores.get("positive") or 0.0)
+    n = float(scores.get("negative") or 0.0)
+    return abs(p - n) < 0.02
+
+def _lexicon_is_decisive(s2: Dict[str, float], threshold: float = 0.06) -> bool:
+    """Lexicon result has a clear directional signal worth trusting."""
+    p2 = float(s2.get("positive", 0.0))
+    n2 = float(s2.get("negative", 0.0))
+    return abs(p2 - n2) >= threshold
+
 def hybrid_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[str, float]]:
     """
-    Try Azure; if it returns the dead-neutral pattern, use lexicon fallback.
-    This is what makes your UI show pos/neg and moves the trend chart.
+    Try Azure; fall back to lexicon when Azure gives a dead-neutral or tied result.
+    Dead-neutral: neu >= 0.92 (Azure literally has no opinion).
+    Tied: abs(pos - neg) < 0.02, i.e. Azure's 0.25-step scoring produced an exact
+    tie such as {pos:0.25, neu:0.50, neg:0.25} — lexicon breaks the tie.
     """
     label, scores = ai_language_sentiment_one(text, min_margin=min_margin)
-    if _azure_is_dead_neutral(scores):
+
+    if _azure_is_dead_neutral(scores) or (label == "neutral" and _azure_is_tied(scores)):
         l2, s2 = lexicon_sentiment_one(text, min_margin=min_margin)
-        # If fallback actually has evidence (not near-pure neutral), override.
-        if not (float(s2.get("neutral", 1.0)) >= 0.90 and abs(float(s2.get("positive", 0.0)) - float(s2.get("negative", 0.0))) < 0.05):
+        if l2 != "neutral" and _lexicon_is_decisive(s2):
             return l2, s2
+
     return label, scores
+
+def hybrid_label_from_stored(text: str, scores: Dict[str, float], *, min_margin: float) -> str:
+    """
+    Re-derive the label for a row that already has stored Azure scores.
+    If the stored scores are tied, try the lexicon as a tiebreaker
+    (avoids an extra Azure API call while still improving the label).
+    """
+    label = sentiment_from_scores(scores, min_margin=min_margin)
+    if label == "neutral" and _azure_is_tied(scores) and text:
+        l2, s2 = lexicon_sentiment_one(text, min_margin=min_margin)
+        if l2 != "neutral" and _lexicon_is_decisive(s2):
+            return l2
+    return label
 
 # ----------------------------
 # fetch_recent with hard normalization + DEV BACKFILL
@@ -646,7 +695,10 @@ def fetch_recent(
         else:
             scores = _coerce_scores(parsed)
 
-        stable_label = sentiment_from_scores(scores, min_margin=min_margin)
+        if missing:
+            stable_label = sentiment_from_scores(scores, min_margin=min_margin)
+        else:
+            stable_label = hybrid_label_from_stored(text, scores, min_margin=min_margin)
 
         out.append({
             "_id": post_id,
@@ -801,6 +853,107 @@ def build_youtube_video_tasks(
     return tasks
 
 # ----------------------------
+# Twitter / X helpers
+# ----------------------------
+
+def _get_twitter_client():
+    """
+    Returns a tweepy.Client.
+    Prefers TWITTER_BEARER_TOKEN (app-only, best for search_recent_tweets).
+    Falls back to OAuth 1.0a if all four credentials are present.
+    """
+    import tweepy  # lazy import — only required if Twitter is used
+
+    bearer = (os.getenv("TWITTER_BEARER_TOKEN") or "").strip() or None
+    if bearer:
+        return tweepy.Client(bearer_token=bearer, wait_on_rate_limit=False)
+
+    api_key    = (os.getenv("TWITTER_API_KEY") or "").strip() or None
+    api_secret = (os.getenv("TWITTER_API_KEY_SECRET") or "").strip() or None
+    acc_token  = (os.getenv("TWITTER_ACCESS_TOKEN") or "").strip() or None
+    acc_secret = (os.getenv("TWITTER_ACCESS_TOKEN_SECRET") or "").strip() or None
+
+    if api_key and api_secret and acc_token and acc_secret:
+        return tweepy.Client(
+            consumer_key=api_key,
+            consumer_secret=api_secret,
+            access_token=acc_token,
+            access_token_secret=acc_secret,
+            wait_on_rate_limit=False,
+        )
+
+    raise RuntimeError(
+        "Twitter credentials not configured. "
+        "Set TWITTER_BEARER_TOKEN (recommended for search) "
+        "or all four OAuth 1.0a env vars."
+    )
+
+
+def twitter_fetch_tweets(query: str, max_results: int = TWITTER_MAX_RESULTS) -> List[Dict[str, Any]]:
+    """
+    Fetch recent tweets via X API v2 search_recent_tweets.
+    Automatically appends lang:en and -is:retweet to the query unless already present.
+    Returns records in the same shape as youtube_fetch_comments.
+    """
+    import tweepy
+
+    max_results = safe_int(max_results, TWITTER_MAX_RESULTS, 10, TWITTER_MAX_RESULTS)
+
+    safe_q = query.strip()
+    if "lang:" not in safe_q:
+        safe_q += " lang:en"
+    if "is:retweet" not in safe_q:
+        safe_q += " -is:retweet"
+
+    client = _get_twitter_client()
+
+    try:
+        response = client.search_recent_tweets(
+            query=safe_q,
+            max_results=max_results,
+            tweet_fields=["id", "text", "created_at", "author_id"],
+        )
+    except tweepy.TweepyException as e:
+        logger.error("Twitter search error query=%r: %s", safe_q, e)
+        raise
+
+    out: List[Dict[str, Any]] = []
+    if not response or not response.data:
+        logger.info("twitter_fetch_tweets: 0 results for query=%r", safe_q)
+        return out
+
+    for tweet in response.data:
+        text = (tweet.text or "").strip()
+        if not text:
+            continue
+        created_at = None
+        if getattr(tweet, "created_at", None):
+            created_at = tweet.created_at.isoformat()
+        out.append({
+            "_id": f"twitter:tweet:{tweet.id}",
+            "platform": "twitter",
+            "topic": None,
+            "text_raw": text,
+            "created_at": created_at,
+            "meta": {"tweet_id": str(tweet.id)},
+        })
+
+    logger.info("twitter_fetch_tweets: %d tweets for query=%r", len(out), safe_q)
+    return out
+
+
+def build_twitter_search_task(*, topic: str, query: str, max_results: int) -> str:
+    task = {
+        "type": "twitter_search",
+        "topic": normalize_topic(topic),
+        "query": query.strip(),
+        "max_results": safe_int(max_results, TWITTER_MAX_RESULTS, 10, TWITTER_MAX_RESULTS),
+        "ingested_at": utc_now_iso(),
+    }
+    return json.dumps(task, ensure_ascii=False)
+
+
+# ----------------------------
 # 1) Timer: ingest (to queue)
 # ----------------------------
 @app.timer_trigger(schedule="0 */10 * * * *", arg_name="timer", run_on_startup=False, use_monitor=True)
@@ -834,54 +987,102 @@ def process_queue(msg: func.QueueMessage) -> None:
         payload = json.loads(msg.get_body().decode("utf-8"))
         msg_type = (payload.get("type") or "").strip().lower()
 
-        if msg_type != "youtube_video":
+        if msg_type == "youtube_video":
+            _process_youtube_video(payload)
+        elif msg_type == "twitter_search":
+            _process_twitter_search(payload)
+        else:
             logger.warning("Unknown queue msg type=%s", msg_type)
-            return
-
-        topic = normalize_topic(payload.get("topic"))
-        video_id = (payload.get("videoId") or "").strip()
-        comments_per_video = safe_int(payload.get("comments_per_video", 500), 500, 1, 2000)
-        ingested_at = parse_iso_datetime(payload.get("ingested_at"))
-
-        if not video_id:
-            return
-
-        comments = youtube_fetch_comments(video_id=video_id, max_results=comments_per_video)
-        if not comments:
-            return
-
-        now_scored = utc_now()
-
-        for c in comments:
-            raw = c.get("text_raw", "") or ""
-            cleaned = clean_text(raw)
-            cleaned_safe = safe_for_text_analytics(cleaned)
-            if not cleaned_safe:
-                continue
-
-            # IMPORTANT: use hybrid scorer so we don't get dead-neutral everywhere
-            label, scores = hybrid_sentiment_one(cleaned_safe, min_margin=SENTIMENT_MIN_MARGIN)
-
-            post_id = c.get("_id") or f"youtube:comment:{uuid.uuid4().hex}"
-            platform = c.get("platform") or "youtube"
-            created_at = parse_iso_datetime(c.get("created_at"))
-
-            upsert_post_scored(
-                post_id=post_id,
-                platform=platform,
-                topic=topic,
-                text_raw=raw,
-                clean=cleaned_safe,
-                created_at=created_at,
-                ingested_at=ingested_at,
-                scored_at=now_scored,
-                sentiment_label=label,
-                sentiment_scores_json=json.dumps(scores, ensure_ascii=False),
-            )
 
     except Exception as e:
         logger.exception("process_queue failed (swallowed): %s", e)
         return
+
+
+def _process_youtube_video(payload: Dict[str, Any]) -> None:
+    topic = normalize_topic(payload.get("topic"))
+    video_id = (payload.get("videoId") or "").strip()
+    comments_per_video = safe_int(payload.get("comments_per_video", 500), 500, 1, 2000)
+    ingested_at = parse_iso_datetime(payload.get("ingested_at"))
+
+    if not video_id:
+        return
+
+    comments = youtube_fetch_comments(video_id=video_id, max_results=comments_per_video)
+    if not comments:
+        return
+
+    now_scored = utc_now()
+
+    for c in comments:
+        raw = c.get("text_raw", "") or ""
+        cleaned = clean_text(raw)
+        cleaned_safe = safe_for_text_analytics(cleaned)
+        if not cleaned_safe:
+            continue
+
+        label, scores = hybrid_sentiment_one(cleaned_safe, min_margin=SENTIMENT_MIN_MARGIN)
+
+        post_id = c.get("_id") or f"youtube:comment:{uuid.uuid4().hex}"
+        platform = c.get("platform") or "youtube"
+        created_at = parse_iso_datetime(c.get("created_at"))
+
+        upsert_post_scored(
+            post_id=post_id,
+            platform=platform,
+            topic=topic,
+            text_raw=raw,
+            clean=cleaned_safe,
+            created_at=created_at,
+            ingested_at=ingested_at,
+            scored_at=now_scored,
+            sentiment_label=label,
+            sentiment_scores_json=json.dumps(scores, ensure_ascii=False),
+        )
+
+
+def _process_twitter_search(payload: Dict[str, Any]) -> None:
+    topic = normalize_topic(payload.get("topic"))
+    query = (payload.get("query") or "").strip()
+    max_results = safe_int(payload.get("max_results", TWITTER_MAX_RESULTS), TWITTER_MAX_RESULTS, 10, TWITTER_MAX_RESULTS)
+    ingested_at = parse_iso_datetime(payload.get("ingested_at"))
+
+    if not query:
+        logger.warning("twitter_search task missing query")
+        return
+
+    tweets = twitter_fetch_tweets(query=query, max_results=max_results)
+    if not tweets:
+        return
+
+    now_scored = utc_now()
+
+    for t in tweets:
+        raw = t.get("text_raw", "") or ""
+        cleaned = clean_text(raw)
+        cleaned_safe = safe_for_text_analytics(cleaned)
+        if not cleaned_safe:
+            continue
+
+        label, scores = hybrid_sentiment_one(cleaned_safe, min_margin=SENTIMENT_MIN_MARGIN)
+
+        post_id = t.get("_id") or f"twitter:tweet:{uuid.uuid4().hex}"
+        created_at = parse_iso_datetime(t.get("created_at"))
+
+        upsert_post_scored(
+            post_id=post_id,
+            platform="twitter",
+            topic=topic,
+            text_raw=raw,
+            clean=cleaned_safe,
+            created_at=created_at,
+            ingested_at=ingested_at,
+            scored_at=now_scored,
+            sentiment_label=label,
+            sentiment_scores_json=json.dumps(scores, ensure_ascii=False),
+        )
+
+    logger.info("_process_twitter_search: stored %d tweets topic=%s query=%r", len(tweets), topic, query)
 
 # ----------------------------
 # 3) HTTP API
@@ -965,3 +1166,42 @@ def ingest_youtube(req: func.HttpRequest, outmsg: func.Out[List[str]]) -> func.H
     except Exception as e:
         logger.exception("ingest_youtube failed: %s", e)
         return func.HttpResponse(f"ingest_youtube failed: {type(e).__name__}: {e}", status_code=500)
+
+
+@app.route(route="ingest/twitter", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.queue_output(arg_name="outmsg", queue_name="ingest-queue", connection="AzureWebJobsStorage")
+def ingest_twitter(req: func.HttpRequest, outmsg: func.Out[List[str]]) -> func.HttpResponse:
+    try:
+        try:
+            body = req.get_json()
+        except Exception:
+            body = {}
+
+        topic = normalize_topic(body.get("topic") or os.getenv("TOPIC_DEFAULT", DEFAULT_TOPIC))
+        query = (body.get("query") or "").strip()
+
+        if not query:
+            return func.HttpResponse(
+                json.dumps({"ok": False, "error": "query is required for Twitter search"}),
+                status_code=400,
+                mimetype="application/json",
+            )
+
+        max_results = safe_int(
+            body.get("max_results", os.getenv("TWITTER_MAX_RESULTS_DEFAULT", str(TWITTER_MAX_RESULTS))),
+            TWITTER_MAX_RESULTS, 10, TWITTER_MAX_RESULTS,
+        )
+
+        task = build_twitter_search_task(topic=topic, query=query, max_results=max_results)
+        outmsg.set([task])
+
+        return json_response({
+            "ok": True,
+            "queued_tasks": 1,
+            "topic": topic,
+            "query": query,
+            "max_results": max_results,
+        })
+    except Exception as e:
+        logger.exception("ingest_twitter failed: %s", e)
+        return func.HttpResponse(f"ingest_twitter failed: {type(e).__name__}: {e}", status_code=500)
