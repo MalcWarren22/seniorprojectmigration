@@ -9,6 +9,10 @@ on:
     paths:
       - 'SentimentFrontend/**'
 
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
