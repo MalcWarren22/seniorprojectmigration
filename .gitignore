@@ -17,10 +17,6 @@
 crash.log
 crash.*.log
 
-# tfvars often contain secrets — commit only *.tfvars.example instead
-*.tfvars
-*.tfvars.json
-
 # override files (local dev)
 override.tf
 override.tf.json
