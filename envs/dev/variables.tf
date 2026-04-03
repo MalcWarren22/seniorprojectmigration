@@ -44,3 +44,11 @@ variable "sqlcon_secret_name" {
   type        = string
   description = "Name of the SQL Connection string secret"
 }
+
+variable "sql_admins_group_name" {
+  type = string
+}
+
+variable "sql_admins_group_object_id" {
+  type = string
+}

@@ -22,3 +22,13 @@ variable "cognitive_account_id" {
   type        = string
   description = "The ID of the Cognitive Account"
 }
+
+variable "sql_admins_group_name" {
+  type = string
+  description = "Display name of the SQL Admin Group"
+}
+
+variable "sql_admins_group_object_id" {
+  type = string
+  description = "Object ID of the SQL Admin Group"
+}
