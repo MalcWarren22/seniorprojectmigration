@@ -64,27 +64,27 @@ module "frontdoor" {
 }
 
 module "observability" {
-  source = "../../modules/observability"
+  source              = "../../modules/observability"
   resource_group_name = azurerm_resource_group.this.name
-  environment = var.environment
-  location = var.location
-  project_name = var.project_name
+  environment         = var.environment
+  location            = var.location
+  project_name        = var.project_name
 }
 
 module "monitor-fd-diagnostics" {
-  source = "../../modules/diagnostics"
-  diagnostic_name = "monitor-fd"
+  source                     = "../../modules/diagnostics"
+  diagnostic_name            = "monitor-fd"
   log_analytics_workspace_id = module.observability.web_law_id
-  target_resource_id = module.frontdoor.fd_profile_id
-  log_category = ["FrontDoorAccessLog", "FrontDoorHealthProbeLog", "FrontDoorWebApplicationFirewallLog"]
+  target_resource_id         = module.frontdoor.fd_profile_id
+  log_category               = ["FrontDoorAccessLog", "FrontDoorHealthProbeLog", "FrontDoorWebApplicationFirewallLog"]
 
   metric_category = ["AllMetrics"]
 }
 module "monitor_storage" {
-  source = "../../modules/diagnostics"
-  diagnostic_name = "monitor-storage"
+  source                     = "../../modules/diagnostics"
+  diagnostic_name            = "monitor-storage"
   log_analytics_workspace_id = module.observability.app_law_id
-  target_resource_id = module.apptier.storage_id
+  target_resource_id         = module.apptier.storage_id
 
   log_category = []
 
@@ -93,10 +93,10 @@ module "monitor_storage" {
 
 
 module "monitor_functions" {
-  source = "../../modules/diagnostics"
-  diagnostic_name = "monitor-functions"
+  source                     = "../../modules/diagnostics"
+  diagnostic_name            = "monitor-functions"
   log_analytics_workspace_id = module.observability.app_law_id
-  target_resource_id = module.apptier.function_app_id
+  target_resource_id         = module.apptier.function_app_id
 
   log_category = ["FunctionAppLogs"]
 
@@ -104,10 +104,10 @@ module "monitor_functions" {
 }
 
 module "monitor_db_sql_server" {
-  source                   = "../../modules/diagnostics"
-  diagnostic_name          = "monitor-sqlserver"
+  source                     = "../../modules/diagnostics"
+  diagnostic_name            = "monitor-sqlserver"
   log_analytics_workspace_id = module.observability.app_law_id
-  target_resource_id       = module.apptier.db_server_id
+  target_resource_id         = module.apptier.db_server_id
 
   log_category = []
 
@@ -115,10 +115,10 @@ module "monitor_db_sql_server" {
 }
 
 module "monitor_db" {
-  source = "../../modules/diagnostics"
-  diagnostic_name = "monitor-database"
+  source                     = "../../modules/diagnostics"
+  diagnostic_name            = "monitor-database"
   log_analytics_workspace_id = module.observability.app_law_id
-  target_resource_id = module.apptier.database_id
+  target_resource_id         = module.apptier.database_id
 
   log_category = [
     "AutomaticTuning",

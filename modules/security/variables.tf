@@ -4,7 +4,7 @@ variable "resource_group_name" {
 
 variable "location" {
   description = "Location of the Project"
-  type = string
+  type        = string
 }
 
 variable "environment" {
@@ -13,40 +13,40 @@ variable "environment" {
 
 variable "tenant_id" {
   description = "The Tenant's ID"
-  type = string
+  type        = string
 }
 
 variable "function_principal_id" {
   description = "The Functions Principal ID"
-  type = string
+  type        = string
 }
 
 variable "project_name" {
   description = "The name of the Project"
-  type = string
+  type        = string
 }
 
 variable "subnet_id" {
   description = "The Subnet ID for the Functions"
-  type = string
+  type        = string
 }
 
 variable "kv_name" {
   description = "The name of the Keyvault"
-  type = string
+  type        = string
 }
 
 variable "virtual_network_id" {
   description = "The ID of the Virtual Network"
-  type = string
+  type        = string
 }
 
 variable "db_server_id" {
   description = "The ID of the Database Server"
-  type = string
+  type        = string
 }
 
 variable "database_name" {
   description = "The Name of the Database"
-  type = string
+  type        = string
 }

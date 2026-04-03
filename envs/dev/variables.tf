@@ -14,14 +14,14 @@ variable "location" {
 }
 
 variable "enable_event_hubs" {
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Enables Event Hubs for Data ingestion if necessary"
 }
 
 variable "enable_private_endpoints" {
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Enables Private Endpoints on PAAS services"
 }
 
@@ -36,11 +36,11 @@ variable "kv_name" {
 }
 
 variable "ai_language_key_secret_name" {
-  type = string
+  type        = string
   description = "The Name for Azure AI Language Secret Key"
 }
 
 variable "sqlcon_secret_name" {
-  type = string
+  type        = string
   description = "Name of the SQL Connection string secret"
 }

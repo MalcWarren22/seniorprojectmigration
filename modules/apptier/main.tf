@@ -29,15 +29,15 @@ resource "azurerm_mssql_server" "this" {
 
   azuread_administrator {
     login_username = "sql-admin-sentanalysis"
-    object_id = var.ad_object_id
-    tenant_id = var.tenant_id
+    object_id      = var.ad_object_id
+    tenant_id      = var.tenant_id
   }
 }
 
 resource "azurerm_mssql_database" "this" {
   name      = "sentiment"
   server_id = azurerm_mssql_server.this.id
-  sku_name = "Basic"
+  sku_name  = "Basic"
 }
 
 resource "azurerm_mssql_firewall_rule" "allow_azure" {
@@ -48,62 +48,62 @@ resource "azurerm_mssql_firewall_rule" "allow_azure" {
 }
 
 resource "azurerm_storage_account" "this" {
-    resource_group_name = var.resource_group_name 
-    name = "st${var.environment}sentimentanalysis44"
-    location = var.location
-    account_tier = "Standard"
-    account_replication_type = "LRS" 
-    access_tier = "Hot"
-    allow_nested_items_to_be_public = false
-    cross_tenant_replication_enabled = false
+  resource_group_name              = var.resource_group_name
+  name                             = "st${var.environment}sentimentanalysis44"
+  location                         = var.location
+  account_tier                     = "Standard"
+  account_replication_type         = "LRS"
+  access_tier                      = "Hot"
+  allow_nested_items_to_be_public  = false
+  cross_tenant_replication_enabled = false
 }
 
 resource "azurerm_service_plan" "this" {
-    resource_group_name = var.resource_group_name
-    name = "appservplan-${var.environment}-${var.project_name}"
-    location = var.location
-    os_type = "Linux"
-    sku_name = "EP1"
+  resource_group_name = var.resource_group_name
+  name                = "appservplan-${var.environment}-${var.project_name}"
+  location            = var.location
+  os_type             = "Linux"
+  sku_name            = "EP1"
 }
 
 resource "azurerm_linux_function_app" "this" {
-  resource_group_name = var.resource_group_name
-  name = "functapp-${var.environment}-${var.project_name}"
-  location = var.location
-  service_plan_id = azurerm_service_plan.this.id
+  resource_group_name  = var.resource_group_name
+  name                 = "functapp-${var.environment}-${var.project_name}"
+  location             = var.location
+  service_plan_id      = azurerm_service_plan.this.id
   storage_account_name = azurerm_storage_account.this.name
 
   storage_uses_managed_identity = true
-  virtual_network_subnet_id = var.function_integration_subnet_id
-  https_only = true
+  virtual_network_subnet_id     = var.function_integration_subnet_id
+  https_only                    = true
 
   identity {
     type = "SystemAssigned"
   }
-   app_settings = {
-  AI_LANGUAGE_ENDPOINT = azurerm_cognitive_account.this.endpoint
+  app_settings = {
+    AI_LANGUAGE_ENDPOINT = azurerm_cognitive_account.this.endpoint
 
-  
-  AI_LANGUAGE_KEY = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/${var.ai_language_key_secret_name}/)"
-  SQLCON = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/${var.sqlcon_secret_name}/)"
-  YOUTUBE_API_KEY      = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/youtube-api-key)"
-  TWITTER_ACCESS_TOKEN = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-access-token)"
-  TWITTER_ACCESS_TOKEN_SECRET = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-access-token-secret)"
-  TWITTER_BEARER_TOKEN = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-bearer-token)"
 
-  APPLICATIONINSIGHTS_CONNECTION_STRING = var.app_insights_connection_string
-  FUNCTIONS_WORKER_RUNTIME              = "python"
-  FUNCTIONS_EXTENSION_VERSION           = "~4"
+    AI_LANGUAGE_KEY             = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/${var.ai_language_key_secret_name}/)"
+    SQLCON                      = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/${var.sqlcon_secret_name}/)"
+    YOUTUBE_API_KEY             = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/youtube-api-key)"
+    TWITTER_ACCESS_TOKEN        = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-access-token)"
+    TWITTER_ACCESS_TOKEN_SECRET = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-access-token-secret)"
+    TWITTER_BEARER_TOKEN        = "@Microsoft.KeyVault(SecretUri=${var.key_vault_uri}secrets/twitter-bearer-token)"
 
-  AzureWebJobsStorage__accountName      = azurerm_storage_account.this.name
-  WEBSITE_RUN_FROM_PACKAGE = "1"
+    APPLICATIONINSIGHTS_CONNECTION_STRING = var.app_insights_connection_string
+    FUNCTIONS_WORKER_RUNTIME              = "python"
+    FUNCTIONS_EXTENSION_VERSION           = "~4"
 
-  TOPIC_DEFAULT = "demo"
-  ENV           = var.environment
-}
+    AzureWebJobsStorage__accountName = azurerm_storage_account.this.name
+    WEBSITE_RUN_FROM_PACKAGE         = "1"
+
+    TOPIC_DEFAULT = "demo"
+    ENV           = var.environment
+  }
 
   site_config {
-    always_on = true
+    always_on              = true
     vnet_route_all_enabled = true
     application_stack {
       python_version = "3.11"
@@ -113,17 +113,17 @@ resource "azurerm_linux_function_app" "this" {
 
 resource "azurerm_cognitive_account" "this" {
   resource_group_name = var.resource_group_name
-  name = "ailanguage-${var.environment}-${var.project_name}"
-  location = var.location
-  kind = "TextAnalytics"
-  sku_name = "F0"
+  name                = "ailanguage-${var.environment}-${var.project_name}"
+  location            = var.location
+  kind                = "TextAnalytics"
+  sku_name            = "F0"
 
   custom_subdomain_name = "cog-sentiment-${var.environment}"
 }
 
 resource "azurerm_static_web_app" "staticapp" {
   resource_group_name = var.resource_group_name
-  name = "sentiment-dev-staticapp"
-  location = var.location
+  name                = "sentiment-dev-staticapp"
+  location            = var.location
 }
 

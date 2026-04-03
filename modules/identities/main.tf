@@ -10,9 +10,9 @@ resource "azurerm_role_assignment" "kv_secrets_user" {
 }
 
 resource "azurerm_role_assignment" "storage_blob" {
-  scope = var.storage_account_id
+  scope                = var.storage_account_id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id = var.function_principal_id
+  principal_id         = var.function_principal_id
 }
 
 resource "azurerm_role_assignment" "storage_queue" {
@@ -22,7 +22,7 @@ resource "azurerm_role_assignment" "storage_queue" {
 }
 
 resource "azurerm_role_assignment" "cog_user" {
-  scope = var.cognitive_account_id
+  scope                = var.cognitive_account_id
   role_definition_name = "Cognitive Services User"
-  principal_id = var.function_principal_id
+  principal_id         = var.function_principal_id
 }
