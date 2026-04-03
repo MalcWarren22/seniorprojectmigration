@@ -2,12 +2,6 @@ locals {
   sqlcon = "Driver={ODBC Driver 18 for SQL Server};Server=tcp:${azurerm_mssql_server.this.fully_qualified_domain_name},1433;Database=${azurerm_mssql_database.this.name};Uid=${var.sql_admin_username};Pwd=${random_password.sql_admin.result};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
 }
 
-resource "azurerm_key_vault_secret" "sqlcon" {
-  name         = var.sqlcon_secret_name
-  value        = local.sqlcon
-  key_vault_id = var.key_vault_id
-}
-
 
 resource "random_password" "sql_admin" {
   length  = 24
