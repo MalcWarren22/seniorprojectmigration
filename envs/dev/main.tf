@@ -10,6 +10,8 @@ module "identities" {
   function_principal_id = module.apptier.function_principal_id
   cognitive_account_id  = module.apptier.cognitive_id
   location              = var.location
+  sql_admins_group_name = var.sql_admins_group_name
+  sql_admins_group_object_id = var.sql_admins_group_object_id
 }
 
 module "networking" {
