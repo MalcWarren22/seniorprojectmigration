@@ -3,20 +3,60 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchRecent, fetchTopics, apiUrl, youtubeSearchSync, twitterSearchSync } from "./api";
 
 /* ----------------------------
+   SVG Icons
+---------------------------- */
+
+function IconPhone({ size = 28, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+      <line x1="12" y1="18" x2="12.01" y2="18" />
+    </svg>
+  );
+}
+
+function IconAndroid({ size = 28, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 18V10a6 6 0 0 1 12 0v8" />
+      <rect x="4" y="12" width="2" height="5" rx="1" />
+      <rect x="18" y="12" width="2" height="5" rx="1" />
+      <circle cx="9" cy="10" r="0.8" fill={color} stroke="none" />
+      <circle cx="15" cy="10" r="0.8" fill={color} stroke="none" />
+      <line x1="8" y1="3" x2="6" y2="1" />
+      <line x1="16" y1="3" x2="18" y2="1" />
+    </svg>
+  );
+}
+
+function IconMagnifier({ size = 28, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function IconPulse({ size = 18, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
+/* ----------------------------
    UI bits
 ---------------------------- */
 
-function Badge({ label }) {
+function SentimentTag({ label }) {
   const l = (label || "").toLowerCase();
-  const cls =
-    l === "positive"
-      ? "badge badge--pos"
-      : l === "negative"
-      ? "badge badge--neg"
-      : l === "neutral"
-      ? "badge badge--neu"
-      : "badge";
-  return <span className={cls}>{label || "n/a"}</span>;
+  return (
+    <span className={`sentimentTag sentimentTag--${l}`}>
+      {label || "n/a"}
+    </span>
+  );
 }
 
 function fmt(n) {
@@ -37,22 +77,15 @@ function fmtTime(value) {
 }
 
 /* ----------------------------
-   Device classifier (for display + coverage)
+   Device classifier
 ---------------------------- */
 
 function classifyDevice(text = "") {
   const t = text.toLowerCase();
-
   const apple =
-    /\b(iphone|ios|imessage|facetime|airdrop|apple\s?pay|apple|macbook|ipad|watch\s?os|airpods)\b/.test(
-      t
-    );
-
+    /\b(iphone|ios|imessage|facetime|airdrop|apple\s?pay|apple|macbook|ipad|watch\s?os|airpods)\b/.test(t);
   const android =
-    /\b(android|pixel|galaxy|samsung|oneplus|motorola|xiaomi|play\s?store|google\s?pay|wear\s?os)\b/.test(
-      t
-    );
-
+    /\b(android|pixel|galaxy|samsung|oneplus|motorola|xiaomi|play\s?store|google\s?pay|wear\s?os)\b/.test(t);
   if (apple && !android) return "iphone";
   if (android && !apple) return "android";
   if (apple && android) return "both";
@@ -67,7 +100,7 @@ function labelForBucket(b) {
 }
 
 /* ----------------------------
-   Confidence policy (frontend)
+   Confidence policy
 ---------------------------- */
 
 const MIN_MARGIN = (() => {
@@ -82,26 +115,16 @@ function clamp01(x) {
   return Math.max(0, Math.min(1, n));
 }
 
-/**
- * getScores()
- * - Hard-normalizes scores so UI never sees {}
- * - Ensures keys exist, numeric, sum=1
- * - Falls back to label-based defaults if missing/invalid
- */
 function getScores(row) {
   const ai = row?.sentiment?.azure_ai || {};
   const raw = ai?.scores;
-
   const label = String(ai?.label || "").toLowerCase();
   const labelNorm =
     label === "positive" || label === "negative" || label === "neutral"
       ? label
       : "neutral";
 
-  let p = 0,
-    neu = 0,
-    neg = 0;
-
+  let p = 0, neu = 0, neg = 0;
   if (raw && typeof raw === "object") {
     p = clamp01(raw.positive);
     neu = clamp01(raw.neutral);
@@ -109,21 +132,10 @@ function getScores(row) {
   }
 
   let s = p + neu + neg;
-
   if (s <= 0) {
-    if (labelNorm === "positive") {
-      p = 0.7;
-      neu = 0.3;
-      neg = 0.0;
-    } else if (labelNorm === "negative") {
-      p = 0.0;
-      neu = 0.3;
-      neg = 0.7;
-    } else {
-      p = 0.15;
-      neu = 0.7;
-      neg = 0.15;
-    }
+    if (labelNorm === "positive") { p = 0.7; neu = 0.3; neg = 0.0; }
+    else if (labelNorm === "negative") { p = 0.0; neu = 0.3; neg = 0.7; }
+    else { p = 0.15; neu = 0.7; neg = 0.15; }
     s = p + neu + neg;
   }
 
@@ -131,29 +143,21 @@ function getScores(row) {
   return { positive: p / s, neutral: neu / s, negative: neg / s };
 }
 
-/**
- * stableLabelFromScores()
- * - Decide only from pos vs neg, with a deadzone (MIN_MARGIN).
- */
 function stableLabelFromScores(scores) {
   const p = Number(scores?.positive ?? 0);
   const n = Number(scores?.negative ?? 0);
-
   if (!Number.isFinite(p) || !Number.isFinite(n)) return "neutral";
   if (Math.abs(p - n) < MIN_MARGIN) return "neutral";
   return p > n ? "positive" : "negative";
 }
 
 /* ----------------------------
-   Summaries (score-based)
+   Summaries
 ---------------------------- */
 
 function summarizeMix(rows) {
-  let pos = 0,
-    neu = 0,
-    neg = 0;
+  let pos = 0, neu = 0, neg = 0;
   let lastIngest = null;
-
   for (const r of rows) {
     if (r?.scored_at) {
       const d = new Date(r.scored_at);
@@ -161,14 +165,12 @@ function summarizeMix(rows) {
         if (!lastIngest || d > lastIngest) lastIngest = d;
       }
     }
-
     const scores = getScores(r);
     const label = stableLabelFromScores(scores);
     if (label === "positive") pos++;
     else if (label === "negative") neg++;
     else neu++;
   }
-
   return { total: rows.length, pos, neu, neg, lastIngest };
 }
 
@@ -182,39 +184,12 @@ function summarizeSignal(rows) {
 function wilsonInterval(pos, neg, z = 1.96) {
   const n = pos + neg;
   if (!n) return { lb: null, ub: null, phat: null, n: 0 };
-
   const phat = pos / n;
   const z2 = z * z;
   const denom = 1 + z2 / n;
   const center = phat + z2 / (2 * n);
   const adj = z * Math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n);
-
-  const lb = (center - adj) / denom;
-  const ub = (center + adj) / denom;
-
-  return { lb, ub, phat, n };
-}
-
-function topTerms(rows, limit = 10) {
-  const stop = new Set([
-    "the","a","an","and","or","but","to","of","in","on","for","is","it","this","that","with","as","at","by","be","are","was","were",
-    "from","you","your","they","them","their","we","our","i","me","my","just","like","have","has","had","not","dont","does","did","can",
-    "could","should","would",
-  ]);
-
-  const counts = new Map();
-
-  for (const r of rows) {
-    const t = (r?.clean_text || "").toLowerCase();
-    const words = t.split(/[^a-z0-9]+/g);
-    for (const w of words) {
-      if (!w || w.length < 4) continue;
-      if (stop.has(w)) continue;
-      counts.set(w, (counts.get(w) || 0) + 1);
-    }
-  }
-
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+  return { lb: (center - adj) / denom, ub: (center + adj) / denom, phat, n };
 }
 
 function topTermsWithSentiment(rows, limit = 10) {
@@ -287,8 +262,25 @@ function useRelativeTime(date) {
   return text;
 }
 
+function useSectionObserver() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) { el.classList.add("is-visible"); obs.disconnect(); }
+      },
+      { threshold: 0.08 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  return ref;
+}
+
 /* ----------------------------
-   Trend chart (no libs)
+   Trend chart
 ---------------------------- */
 
 function toDateSafe(value) {
@@ -303,15 +295,11 @@ function formatBucketLabel(key, granularity, prevKey) {
     const day = key.slice(0, 10);
     const prevDay = prevKey ? prevKey.slice(0, 10) : null;
     if (!prevKey || day !== prevDay) {
-      const m = key.slice(5, 7);
-      const d = key.slice(8, 10);
-      return `${m}/${d} ${hh}h`;
+      return `${key.slice(5, 7)}/${key.slice(8, 10)} ${hh}h`;
     }
     return `${hh}:00`;
   }
-  const m = key.slice(5, 7);
-  const d = key.slice(8, 10);
-  return `${m}/${d}`;
+  return `${key.slice(5, 7)}/${key.slice(8, 10)}`;
 }
 
 function smoothLinePath(pts) {
@@ -337,51 +325,41 @@ function smoothLinePath(pts) {
 }
 
 function TrendChart({ series, granularity = "day" }) {
-  const W = 980;
-  const H = 240;
-  const PL = 42;
-  const PR = 14;
-  const PT = 14;
-  const PB = 28;
-
+  const W = 900, H = 220, PL = 38, PR = 12, PT = 12, PB = 26;
   const allPoints = series.flatMap((s) => s.points);
   if (!allPoints.length) {
-    return <div className="trendEmpty">No trend data yet.</div>;
+    return (
+      <div className="trendEmpty">
+        <IconPulse size={32} color="var(--muted2)" />
+        <span>No trend data yet — run a search to populate</span>
+      </div>
+    );
   }
 
   const xKeys = Array.from(new Set(allPoints.map((p) => p.xKey))).sort();
   const xIndex = new Map(xKeys.map((k, i) => [k, i]));
-
   const plotW = W - PL - PR;
   const plotH = H - PT - PB;
-
   const xs = (i) => xKeys.length === 1 ? PL + plotW / 2 : PL + (i * plotW) / (xKeys.length - 1);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const ys = (y) => PT + (1 - (clamp(y, -1, 1) + 1) / 2) * plotH;
-
-  const baseline = ys(0);
   const gridLines = [-1, -0.5, 0, 0.5, 1];
-
   const buildPts = (points) =>
-    points
-      .filter((p) => xIndex.has(p.xKey) && p.y != null)
-      .map((p) => [xs(xIndex.get(p.xKey)), ys(p.y)]);
+    points.filter((p) => xIndex.has(p.xKey) && p.y != null).map((p) => [xs(xIndex.get(p.xKey)), ys(p.y)]);
 
   const labelCount = Math.min(9, xKeys.length);
   const labelEvery = Math.max(1, Math.floor(xKeys.length / labelCount));
   const visibleLabelIdxs = new Set(
-    xKeys
-      .map((_, i) => i)
-      .filter((i) => i % labelEvery === 0 || i === xKeys.length - 1)
+    xKeys.map((_, i) => i).filter((i) => i % labelEvery === 0 || i === xKeys.length - 1)
   );
 
   return (
     <div className="trendWrap">
       <div className="trendHeader">
-        <div className="trendTitle">Sentiment trend</div>
+        <div className="trendTitle">Sentiment Trend</div>
         <div className="trendSub">
           Net signal = (pos − neg) / (pos + neg) per{" "}
-          {granularity === "hour" ? "hour" : granularity === "week" ? "week" : "day"} · neutral excluded · min 3 posts/bucket
+          {granularity === "hour" ? "hour" : granularity === "week" ? "week" : "day"} · min 3 posts/bucket
         </div>
         <div className="trendLegend">
           {series.map((s) => (
@@ -392,64 +370,39 @@ function TrendChart({ series, granularity = "day" }) {
           ))}
         </div>
       </div>
-
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="trendSvg"
-        role="img"
-        aria-label="Sentiment trend chart"
-      >
+      <svg viewBox={`0 0 ${W} ${H}`} className="trendSvg" role="img" aria-label="Sentiment trend chart">
         {gridLines.map((g) => (
           <g key={g}>
-            <line
-              x1={PL}
-              x2={W - PR}
-              y1={ys(g)}
-              y2={ys(g)}
-              className={g === 0 ? "gridLine gridLine--mid" : "gridLine"}
-            />
-            <text x={PL - 6} y={ys(g) + 4} textAnchor="end" className="gridLabel">
-              {g.toFixed(1)}
-            </text>
+            <line x1={PL} x2={W - PR} y1={ys(g)} y2={ys(g)} className={g === 0 ? "gridLine gridLine--mid" : "gridLine"} />
+            <text x={PL - 5} y={ys(g) + 4} textAnchor="end" className="gridLabel">{g.toFixed(1)}</text>
           </g>
         ))}
-
         {series.map((s) => {
           const pts = buildPts(s.points);
           if (!pts.length) return null;
-
           if (pts.length === 1) {
             return (
               <g key={s.name}>
-                <line x1={PL} x2={W - PR} y1={pts[0][1]} y2={pts[0][1]}
-                  className="gridLine" strokeDasharray="4 4" />
-                <circle cx={pts[0][0]} cy={pts[0][1]} r={5}
-                  className={`trendDot trendDot--${s.tone}`} />
+                <line x1={PL} x2={W - PR} y1={pts[0][1]} y2={pts[0][1]} className="gridLine" strokeDasharray="4 4" />
+                <circle cx={pts[0][0]} cy={pts[0][1]} r={4} className={`trendDot trendDot--${s.tone}`} />
               </g>
             );
           }
-
-          const linePd = smoothLinePath(pts);
-          const first = pts[0], last = pts[pts.length - 1];
-          const areaPd = `${linePd} L ${last[0].toFixed(1)},${baseline.toFixed(1)} L ${first[0].toFixed(1)},${baseline.toFixed(1)} Z`;
-
           return (
             <g key={s.name}>
-              <path d={areaPd} className={`trendArea trendArea--${s.tone}`} />
-              <path d={linePd} className={`trendLine trendLine--${s.tone}`} fill="none" />
+              <path d={smoothLinePath(pts)} className={`trendLine trendLine--${s.tone}`} fill="none" />
               {pts.map(([px, py], di) => (
                 <circle key={di} cx={px} cy={py} r={3} className={`trendDot trendDot--${s.tone}`} />
               ))}
             </g>
           );
         })}
-
         {xKeys.map((k, idx) => {
           if (!visibleLabelIdxs.has(idx)) return null;
           const prevVisIdx = [...visibleLabelIdxs].filter((i) => i < idx).pop();
           const prevKey = prevVisIdx != null ? xKeys[prevVisIdx] : null;
           return (
-            <text key={k} x={xs(idx)} y={H - 6} textAnchor="middle" className="xLabel">
+            <text key={k} x={xs(idx)} y={H - 5} textAnchor="middle" className="xLabel">
               {formatBucketLabel(k, granularity, prevKey)}
             </text>
           );
@@ -480,14 +433,17 @@ function donutArc(cx, cy, R, r, startDeg, endDeg) {
   return `M ${x1.toFixed(2)},${y1.toFixed(2)} A ${R},${R} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} L ${ix1.toFixed(2)},${iy1.toFixed(2)} A ${r},${r} 0 ${large} 0 ${ix2.toFixed(2)},${iy2.toFixed(2)} Z`;
 }
 
-function DonutChart({ label, pos, neu, neg }) {
+function DonutChart({ label, pos, neu, neg, compact = false }) {
+  const sz = compact ? 120 : 180;
+  const W = sz, H = sz, cx = sz / 2, cy = sz / 2;
+  const R = compact ? 44 : 68;
+  const r = compact ? 28 : 44;
   const total = pos + neu + neg;
-  const W = 200, H = 200, cx = 100, cy = 100, R = 76, r = 50;
 
   if (!total) {
     return (
       <div className="donutWrap">
-        <div className="donutTitle">{label}</div>
+        {label && <div className="donutTitle">{label}</div>}
         <div className="donutEmpty">No data yet</div>
       </div>
     );
@@ -498,7 +454,6 @@ function DonutChart({ label, pos, neu, neg }) {
   const negPct = neg / total;
   const posEnd = pPct * 360;
   const neuEnd = posEnd + neuPct * 360;
-
   const dominant = pos >= neg && pos >= neu ? "positive" : neg >= pos && neg >= neu ? "negative" : "neutral";
   const domPct = dominant === "positive" ? pPct : dominant === "negative" ? negPct : neuPct;
 
@@ -510,26 +465,27 @@ function DonutChart({ label, pos, neu, neg }) {
 
   return (
     <div className="donutWrap">
-      <div className="donutTitle">{label}</div>
+      {label && <div className="donutTitle">{label}</div>}
       <svg viewBox={`0 0 ${W} ${H}`} className="donutSvg">
         {segments.map((s) =>
           (s.end - s.start) > 0.5 ? (
-            <path key={s.key} d={donutArc(cx, cy, R, r, s.start, s.end)}
-              className={`donutSeg ${s.cls}`} />
+            <path key={s.key} d={donutArc(cx, cy, R, r, s.start, s.end)} className={`donutSeg ${s.cls}`} />
           ) : null
         )}
-        <text x={cx} y={cy - 8} className="donutCenterBig" textAnchor="middle">
+        <text x={cx} y={cy - 6} className="donutCenterBig" textAnchor="middle">
           {Math.round(domPct * 100)}%
         </text>
         <text x={cx} y={cy + 14} className="donutCenterSub" textAnchor="middle">
           {dominant}
         </text>
       </svg>
-      <div className="donutLegend">
-        <span className="donutLegItem donutLegItem--pos">▲ {Math.round(pPct * 100)}% pos</span>
-        <span className="donutLegItem donutLegItem--neu">● {Math.round(neuPct * 100)}% neu</span>
-        <span className="donutLegItem donutLegItem--neg">▼ {Math.round(negPct * 100)}% neg</span>
-      </div>
+      {!compact && (
+        <div className="donutLegend">
+          <span className="donutLegItem donutLegItem--pos">{Math.round(pPct * 100)}% pos</span>
+          <span className="donutLegItem donutLegItem--neu">{Math.round(neuPct * 100)}% neu</span>
+          <span className="donutLegItem donutLegItem--neg">{Math.round(negPct * 100)}% neg</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -550,88 +506,10 @@ function getPageNums(current, total) {
 }
 
 /* ----------------------------
-   Battle Banner
----------------------------- */
-
-function BattleBanner({ sumIphone, sumAndroid, decision, loading }) {
-  const ipSig = sumIphone.signal || 0;
-  const anSig = sumAndroid.signal || 0;
-  const total = ipSig + anSig || 1;
-  const ipW = ((ipSig / total) * 100).toFixed(1);
-  const anW = ((anSig / total) * 100).toFixed(1);
-  const ipPosRate = sumIphone.signal > 0 ? Math.round((sumIphone.pos / sumIphone.signal) * 100) : null;
-  const anPosRate = sumAndroid.signal > 0 ? Math.round((sumAndroid.pos / sumAndroid.signal) * 100) : null;
-  const hasData = ipSig > 0 || anSig > 0;
-  const showVerdict = hasData && decision.label && decision.label !== "Not enough signal" && decision.label !== "Even";
-
-  return (
-    <div className="battleBanner">
-      <div className="battleSide battleSide--ip">
-        <div className="battleEmoji">🍎</div>
-        <div className="battleName">iPhone</div>
-        {ipPosRate != null ? (
-          <>
-            <div className="battlePct">{ipPosRate}%</div>
-            <div className="battleSub">positive sentiment</div>
-          </>
-        ) : (
-          <div className="battleSub">no data yet</div>
-        )}
-      </div>
-
-      <div className="battleCenter">
-        {loading ? (
-          <div className="battleLoading">Analyzing comments…</div>
-        ) : showVerdict ? (
-          <div className="battleVerdict">
-            {decision.label === "iPhone" ? "🍎" : "🤖"}{" "}
-            <span>{decision.label}</span>{" "}
-            <span className="battleVerdictSub">leads</span>
-          </div>
-        ) : hasData ? (
-          <div className="battleVs">TOO CLOSE</div>
-        ) : (
-          <div className="battleVs">VS</div>
-        )}
-        <div className="battleBarTrack">
-          <div className="battleBarFill--ip" style={{ width: `${ipW}%` }} />
-          <div className="battleBarFill--an" style={{ width: `${anW}%` }} />
-        </div>
-        <div className="battleBarLabels">
-          {hasData ? (
-            <>
-              <span>{ipSig} iPhone signal</span>
-              <span>{anSig} Android signal</span>
-            </>
-          ) : (
-            <span style={{ margin: "0 auto" }}>Search to start the battle</span>
-          )}
-        </div>
-      </div>
-
-      <div className="battleSide battleSide--an">
-        <div className="battleEmoji">🤖</div>
-        <div className="battleName">Android</div>
-        {anPosRate != null ? (
-          <>
-            <div className="battlePct">{anPosRate}%</div>
-            <div className="battleSub">positive sentiment</div>
-          </>
-        ) : (
-          <div className="battleSub">no data yet</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ----------------------------
    App
 ---------------------------- */
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 export default function App() {
   const [apiStatus, setApiStatus] = useState("checking");
@@ -654,6 +532,12 @@ export default function App() {
   const [pageSize, setPageSize] = useState(25);
   const [sentFilter, setSentFilter] = useState("all");
 
+  const sectionHero  = useSectionObserver();
+  const sectionSide  = useSectionObserver();
+  const sectionIpie  = useSectionObserver();
+  const sectionApie  = useSectionObserver();
+  const sectionTable = useSectionObserver();
+
   async function checkHealth() {
     try {
       const res = await fetch(apiUrl("/health"), { cache: "no-store" });
@@ -668,7 +552,6 @@ export default function App() {
   async function load({ silent = false, dbOnly = false } = {}) {
     if (!silent) setErr("");
     setLoading(true);
-
     const qText = query.trim();
     const doIngest = Boolean(qText) && !dbOnly;
 
@@ -676,76 +559,37 @@ export default function App() {
       if (doIngest) {
         if (source === "youtube") {
           setLoadPhase("Searching YouTube…");
-          const ytData = await youtubeSearchSync({
-            topic: topic || "demo",
-            query: qText,
-            max_videos: 5,
-            comments_per_video: 200,
-          });
+          const ytData = await youtubeSearchSync({ topic: topic || "demo", query: qText, max_videos: 5, comments_per_video: 200 });
           setRows(Array.isArray(ytData) ? ytData : []);
-          setTablePage(1);
-          setLastRefreshed(new Date());
-          setApiStatus("online");
-          setLastCheck(new Date());
+          setTablePage(1); setLastRefreshed(new Date()); setApiStatus("online"); setLastCheck(new Date());
           return;
         }
-
         if (source === "twitter") {
-          setLoadPhase("Fetching and scoring from X / Twitter…");
-          const twitterData = await twitterSearchSync({
-            topic: topic || "demo",
-            query: qText,
-            max_results: 100,
-          });
+          setLoadPhase("Fetching from X / Twitter…");
+          const twitterData = await twitterSearchSync({ topic: topic || "demo", query: qText, max_results: 100 });
           setRows(Array.isArray(twitterData) ? twitterData : []);
-          setTablePage(1);
-          setLastRefreshed(new Date());
-          setApiStatus("online");
-          setLastCheck(new Date());
+          setTablePage(1); setLastRefreshed(new Date()); setApiStatus("online"); setLastCheck(new Date());
           return;
         }
-
         if (source === "both") {
-          setLoadPhase("Searching YouTube + X / Twitter…");
+          setLoadPhase("Searching YouTube + X…");
           const [ytData, twitterData] = await Promise.all([
-            youtubeSearchSync({
-              topic: topic || "demo",
-              query: qText,
-              max_videos: 5,
-              comments_per_video: 200,
-            }),
-            twitterSearchSync({
-              topic: topic || "demo",
-              query: qText,
-              max_results: 100,
-            }),
+            youtubeSearchSync({ topic: topic || "demo", query: qText, max_videos: 5, comments_per_video: 200 }),
+            twitterSearchSync({ topic: topic || "demo", query: qText, max_results: 100 }),
           ]);
-          const combined = [
-            ...(Array.isArray(ytData) ? ytData : []),
-            ...(Array.isArray(twitterData) ? twitterData : []),
-          ];
+          const combined = [...(Array.isArray(ytData) ? ytData : []), ...(Array.isArray(twitterData) ? twitterData : [])];
           setRows(combined);
-          setTablePage(1);
-          setLastRefreshed(new Date());
-          setApiStatus("online");
-          setLastCheck(new Date());
+          setTablePage(1); setLastRefreshed(new Date()); setApiStatus("online"); setLastCheck(new Date());
           return;
         }
       }
 
       setLoadPhase("Loading data…");
-
-      // After a fresh ingest, don't stop on pre-existing rows — keep polling
-      // until we see NEW data (rows scored after ingest started) or exhaust attempts.
       const ingestStart = doIngest ? Date.now() - 2000 : null;
       let data = [];
 
       for (let attempt = 0; attempt < 5; attempt++) {
-        if (attempt > 0) {
-          setLoadPhase(`Waiting for scoring… (${attempt}/4)`);
-          await sleep(800);
-        }
-
+        if (attempt > 0) { setLoadPhase(`Waiting for scoring… (${attempt}/4)`); await sleep(800); }
         data = await fetchRecent({
           topic: topic || undefined,
           limit,
@@ -754,13 +598,8 @@ export default function App() {
           backfill: attempt === 0,
           min_margin: MIN_MARGIN,
         });
-
         if (!Array.isArray(data)) { data = []; break; }
-
-        // If we did not ingest, any rows are fine
         if (!ingestStart) { if (data.length > 0) break; continue; }
-
-        // If we did ingest, look for at least one row scored after ingest started
         const hasNew = data.some((r) => {
           const t = r?.scored_at ? new Date(r.scored_at).getTime() : 0;
           return t >= ingestStart;
@@ -769,18 +608,12 @@ export default function App() {
       }
 
       setRows(data);
-      setTablePage(1);
-      setLastRefreshed(new Date());
-      setApiStatus("online");
-      setLastCheck(new Date());
+      setTablePage(1); setLastRefreshed(new Date()); setApiStatus("online"); setLastCheck(new Date());
     } catch (e) {
       if (!silent) setErr(e?.message || "Request failed");
-      setApiStatus("offline");
-      setLastCheck(new Date());
-      setRows([]);
+      setApiStatus("offline"); setLastCheck(new Date()); setRows([]);
     } finally {
-      setLoading(false);
-      setLoadPhase("");
+      setLoading(false); setLoadPhase("");
     }
   }
 
@@ -801,11 +634,7 @@ export default function App() {
   }, [rows.length]);
 
   const buckets = useMemo(() => {
-    const iphone = [];
-    const android = [];
-    const both = [];
-    const neither = [];
-
+    const iphone = [], android = [], both = [], neither = [];
     for (const r of rows) {
       const bucket = classifyDevice(r?.clean_text || "");
       if (bucket === "iphone") iphone.push(r);
@@ -813,14 +642,12 @@ export default function App() {
       else if (bucket === "both") both.push(r);
       else neither.push(r);
     }
-
     return { iphone, android, both, neither };
   }, [rows]);
 
-  // "both" posts mention iPhone AND Android — count them for each side
-  const sumIphone = useMemo(() => summarizeSignal([...buckets.iphone, ...buckets.both]), [buckets.iphone, buckets.both]);
+  const sumIphone  = useMemo(() => summarizeSignal([...buckets.iphone, ...buckets.both]), [buckets.iphone, buckets.both]);
   const sumAndroid = useMemo(() => summarizeSignal([...buckets.android, ...buckets.both]), [buckets.android, buckets.both]);
-  const overall = useMemo(() => summarizeMix(rows), [rows]);
+  const overall    = useMemo(() => summarizeMix(rows), [rows]);
 
   const coverage = useMemo(() => {
     const matched = buckets.iphone.length + buckets.android.length + buckets.both.length;
@@ -830,30 +657,18 @@ export default function App() {
   const ipWilson = useMemo(() => wilsonInterval(sumIphone.pos, sumIphone.neg), [sumIphone.pos, sumIphone.neg]);
   const anWilson = useMemo(() => wilsonInterval(sumAndroid.pos, sumAndroid.neg), [sumAndroid.pos, sumAndroid.neg]);
 
-  // Scale threshold with data — require at least 5, up to 25
   const MIN_EFFECTIVE_SIGNAL = Math.max(5, Math.min(25, Math.floor(rows.length * 0.05)));
 
   const decision = useMemo(() => {
     const ipSig = sumIphone.signal;
     const anSig = sumAndroid.signal;
-
     if (ipSig < MIN_EFFECTIVE_SIGNAL || anSig < MIN_EFFECTIVE_SIGNAL) {
-      return {
-        label: "Not enough signal",
-        detail: `Need ≥ ${MIN_EFFECTIVE_SIGNAL} pos/neg per side (iPhone ${ipSig}, Android ${anSig}).`,
-        confidence: null,
-      };
+      return { label: "Not enough signal", detail: `Need ≥ ${MIN_EFFECTIVE_SIGNAL} pos/neg per side (iPhone ${ipSig}, Android ${anSig}).`, confidence: null };
     }
-
     if (ipWilson.lb != null && anWilson.lb != null) {
-      if (ipWilson.lb > anWilson.ub) {
-        return { label: "iPhone", detail: "statistically higher positive-rate", confidence: ipWilson.lb - anWilson.ub };
-      }
-      if (anWilson.lb > ipWilson.ub) {
-        return { label: "Android", detail: "statistically higher positive-rate", confidence: anWilson.lb - ipWilson.ub };
-      }
+      if (ipWilson.lb > anWilson.ub) return { label: "iPhone", detail: "statistically higher positive-rate", confidence: ipWilson.lb - anWilson.ub };
+      if (anWilson.lb > ipWilson.ub) return { label: "Android", detail: "statistically higher positive-rate", confidence: anWilson.lb - ipWilson.ub };
     }
-
     const netDiff = (sumIphone.netSignal ?? 0) - (sumAndroid.netSignal ?? 0);
     const deadzone = 0.08;
     if (netDiff > deadzone) return { label: "iPhone", detail: "leaning positive (signal)", confidence: Math.abs(netDiff) };
@@ -861,23 +676,13 @@ export default function App() {
     return { label: "Even", detail: "confidence intervals overlap", confidence: Math.abs(netDiff) };
   }, [sumIphone.signal, sumAndroid.signal, sumIphone.netSignal, sumAndroid.netSignal, ipWilson, anWilson]);
 
-  const netDiff = useMemo(() => {
-    const a = sumIphone.netSignal ?? 0;
-    const b = sumAndroid.netSignal ?? 0;
-    return a - b;
-  }, [sumIphone.netSignal, sumAndroid.netSignal]);
-
   const trend = useMemo(() => {
-    const allDates = rows
-      .map((r) => toDateSafe(r?.created_at) ?? toDateSafe(r?.scored_at))
-      .filter(Boolean);
-
+    const allDates = rows.map((r) => toDateSafe(r?.created_at) ?? toDateSafe(r?.scored_at)).filter(Boolean);
     if (!allDates.length) return { granularity: "day", series: [] };
 
     const minMs = Math.min(...allDates.map((d) => d.getTime()));
     const maxMs = Math.max(...allDates.map((d) => d.getTime()));
     const spanDays = (maxMs - minMs) / (1000 * 60 * 60 * 24);
-
     const granularity = spanDays <= 3 ? "hour" : spanDays <= 60 ? "day" : "week";
     const MIN_BUCKET = 3;
 
@@ -886,19 +691,12 @@ export default function App() {
       copy.setDate(copy.getDate() - copy.getDay());
       return copy;
     }
-
     function bucketKey(d) {
-      const fmt = (x) => String(x).padStart(2, "0");
-      if (granularity === "hour") {
-        return `${d.getFullYear()}-${fmt(d.getMonth() + 1)}-${fmt(d.getDate())} ${fmt(d.getHours())}`;
-      }
-      if (granularity === "week") {
-        const ws = weekStart(d);
-        return `${ws.getFullYear()}-${fmt(ws.getMonth() + 1)}-${fmt(ws.getDate())}`;
-      }
-      return `${d.getFullYear()}-${fmt(d.getMonth() + 1)}-${fmt(d.getDate())}`;
+      const fmt2 = (x) => String(x).padStart(2, "0");
+      if (granularity === "hour") return `${d.getFullYear()}-${fmt2(d.getMonth() + 1)}-${fmt2(d.getDate())} ${fmt2(d.getHours())}`;
+      if (granularity === "week") { const ws = weekStart(d); return `${ws.getFullYear()}-${fmt2(ws.getMonth() + 1)}-${fmt2(ws.getDate())}`; }
+      return `${d.getFullYear()}-${fmt2(d.getMonth() + 1)}-${fmt2(d.getDate())}`;
     }
-
     function netSignalForRows(rowsInBucket) {
       let pos = 0, neg = 0;
       for (const r of rowsInBucket) {
@@ -910,7 +708,6 @@ export default function App() {
       const sig = pos + neg;
       return sig ? (pos - neg) / sig : null;
     }
-
     function buildSeries(name, rowsArr, tone) {
       const map = new Map();
       for (const r of rowsArr) {
@@ -921,12 +718,9 @@ export default function App() {
         map.get(k).push(r);
       }
       const keys = Array.from(map.keys()).sort();
-      const points = keys
-        .filter((k) => map.get(k).length >= MIN_BUCKET)
-        .map((k) => ({ xKey: k, y: netSignalForRows(map.get(k)) }));
+      const points = keys.filter((k) => map.get(k).length >= MIN_BUCKET).map((k) => ({ xKey: k, y: netSignalForRows(map.get(k)) }));
       return { name, tone, points };
     }
-
     return {
       granularity,
       series: [
@@ -936,23 +730,19 @@ export default function App() {
     };
   }, [rows, buckets.iphone, buckets.android, buckets.both]);
 
-  const iphoneTerms = useMemo(() => topTermsWithSentiment([...buckets.iphone, ...buckets.both], 10), [buckets.iphone, buckets.both]);
+  const iphoneTerms  = useMemo(() => topTermsWithSentiment([...buckets.iphone, ...buckets.both], 10), [buckets.iphone, buckets.both]);
   const androidTerms = useMemo(() => topTermsWithSentiment([...buckets.android, ...buckets.both], 10), [buckets.android, buckets.both]);
 
   const refreshedAgo = useRelativeTime(lastRefreshed);
-  const ipCountUp = useCountUp(sumIphone.total);
-  const anCountUp = useCountUp(sumAndroid.total);
+  const ipCountUp    = useCountUp(sumIphone.total);
+  const anCountUp    = useCountUp(sumAndroid.total);
 
   const heroText = useMemo(() => {
-    if (!overall.total) return "No data yet — click Search to load scored posts.";
+    if (!overall.total) return "No data yet — enter a search query to load scored posts.";
     const cov = coverage == null ? "—" : `${Math.round(coverage * 100)}%`;
-    if (decision.label === "Not enough signal") {
-      return `Not enough reliable positive/negative signal to declare a winner yet. Coverage: ${cov} of rows mention iPhone/Android.`;
-    }
-    if (decision.label === "Even") {
-      return `Sentiment is too close to call with confidence. Coverage: ${cov} of rows mention iPhone/Android.`;
-    }
-    return `${decision.label} is trending more positive with higher confidence. Coverage: ${cov} of rows mention iPhone/Android (or both).`;
+    if (decision.label === "Not enough signal") return `Insufficient signal to determine a leader. Coverage: ${cov} of posts mention iPhone or Android.`;
+    if (decision.label === "Even") return `Sentiment is within statistical margin — no clear leader. Coverage: ${cov} of posts mention iPhone or Android.`;
+    return `${decision.label} has a statistically higher positive sentiment rate. Coverage: ${cov} of posts mention iPhone or Android (or both).`;
   }, [overall.total, coverage, decision.label]);
 
   const ipPosRate = sumIphone.signal > 0 ? sumIphone.pos / sumIphone.signal : null;
@@ -976,168 +766,184 @@ export default function App() {
   useEffect(() => { setTablePage(1); }, [rows, sentFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const safePage = Math.min(tablePage, pageCount);
-  const pageRows = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const safePage  = Math.min(tablePage, pageCount);
+  const pageRows  = filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const ipSignalTotal = sumIphone.signal || 0;
+  const anSignalTotal = sumAndroid.signal || 0;
+  const signalTotal   = ipSignalTotal + anSignalTotal || 1;
+  const ipBarW = ((ipSignalTotal / signalTotal) * 100).toFixed(1);
+  const anBarW = ((anSignalTotal / signalTotal) * 100).toFixed(1);
+
+  const verdictDevice = decision.label === "iPhone" ? "ip" : decision.label === "Android" ? "an" : null;
 
   return (
-    <div className="page">
+    <div className="shell">
       {loading && <div className="loadBar" />}
 
-      <header className="topbar">
-        <div className="brand">
-          <div className="logoIcon">📊</div>
+      {/* ── SIDEBAR ── */}
+      <aside className="sidebar">
+        <div className="sidebarBrand">
+          <div className="sidebarLogoMark">
+            <IconPulse size={15} color="#fff" />
+          </div>
           <div>
-            <div className="title">SentimentIQ</div>
-            <div className="subtitle">iPhone vs Android · YouTube · X · Azure AI</div>
+            <div className="sidebarTitle">Sentiment OS</div>
+            <div className="sidebarTagline">Real-time opinion intelligence</div>
           </div>
         </div>
-        <div className="topbarRight">
-          {rows.length > 0 && !loading && (
-            <div className="liveBadge">
-              <span className="livePulse" />
-              Live
+
+        <div className="sideStatus">
+          <span className="statusDot" data-status={apiStatus} />
+          <span className="sideStatusLabel">{apiStatus}</span>
+          {refreshedAgo && <span className="sideStatusAge">{refreshedAgo}</span>}
+        </div>
+
+        {/* iPhone device panel */}
+        <div className="sideDevice sideDevice--ip">
+          <div className="sideDeviceHead">
+            <IconPhone size={14} color="var(--ip)" />
+            <span className="sideDeviceName">iPhone</span>
+            <span className={`sigArrow ${ipArrow.cls}`}>{ipArrow.char}</span>
+          </div>
+          <div className="sideDeviceStat">{ipCountUp.toLocaleString()}</div>
+          <div className="sideDeviceMeta">
+            {sumIphone.signal} signals
+            {ipPosRate != null && <span className="sideDeviceRate"> · {Math.round(ipPosRate * 100)}% pos</span>}
+          </div>
+          {loading
+            ? <div className="donutSkeletonWrap compact"><div className="skeleton" style={{ width: 90, height: 90, borderRadius: "50%" }} /></div>
+            : <DonutChart label="" pos={sumIphone.pos} neu={sumIphone.neu} neg={sumIphone.neg} compact />
+          }
+        </div>
+
+        {/* Android device panel */}
+        <div className="sideDevice sideDevice--an">
+          <div className="sideDeviceHead">
+            <IconAndroid size={14} color="var(--an)" />
+            <span className="sideDeviceName">Android</span>
+            <span className={`sigArrow ${anArrow.cls}`}>{anArrow.char}</span>
+          </div>
+          <div className="sideDeviceStat">{anCountUp.toLocaleString()}</div>
+          <div className="sideDeviceMeta">
+            {sumAndroid.signal} signals
+            {anPosRate != null && <span className="sideDeviceRate"> · {Math.round(anPosRate * 100)}% pos</span>}
+          </div>
+          {loading
+            ? <div className="donutSkeletonWrap compact"><div className="skeleton" style={{ width: 90, height: 90, borderRadius: "50%" }} /></div>
+            : <DonutChart label="" pos={sumAndroid.pos} neu={sumAndroid.neu} neg={sumAndroid.neg} compact />
+          }
+        </div>
+
+        {/* Signal mix */}
+        <div className="sideSignalMix">
+          <div className="sideSignalTitle">Signal Mix</div>
+
+          <div className="sideSignalBlock">
+            <div className="sideSignalDevice sideSignalDevice--ip">
+              <IconPhone size={11} color="var(--ip)" /> iPhone
             </div>
-          )}
-          {refreshedAgo && (
-            <span className="refreshChip">Updated {refreshedAgo}</span>
-          )}
-          <div className="statusChip">
-            <span className="statusDot" data-status={apiStatus} />
-            <span style={{ textTransform: "capitalize" }}>{apiStatus}</span>
+            {[["Pos", sumIphone.pos, sumIphone.total, "pos"], ["Neu", sumIphone.neu, sumIphone.total, "neu"], ["Neg", sumIphone.neg, sumIphone.total, "neg"]].map(([lbl, val, tot, tone]) => (
+              <div key={lbl} className="signalBarRow">
+                <span className="signalBarLabel">{lbl}</span>
+                <div className="signalBarTrack"><div className={`signalBarFill signalBarFill--${tone}`} style={{ width: tot ? `${(val / tot) * 100}%` : "0%" }} /></div>
+                <span className="signalBarCount">{val}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="sideSignalBlock">
+            <div className="sideSignalDevice sideSignalDevice--an">
+              <IconAndroid size={11} color="var(--an)" /> Android
+            </div>
+            {[["Pos", sumAndroid.pos, sumAndroid.total, "pos"], ["Neu", sumAndroid.neu, sumAndroid.total, "neu"], ["Neg", sumAndroid.neg, sumAndroid.total, "neg"]].map(([lbl, val, tot, tone]) => (
+              <div key={lbl} className="signalBarRow">
+                <span className="signalBarLabel">{lbl}</span>
+                <div className="signalBarTrack"><div className={`signalBarFill signalBarFill--${tone}`} style={{ width: tot ? `${(val / tot) * 100}%` : "0%" }} /></div>
+                <span className="signalBarCount">{val}</span>
+              </div>
+            ))}
           </div>
         </div>
-      </header>
 
-      <BattleBanner sumIphone={sumIphone} sumAndroid={sumAndroid} decision={decision} loading={loading} />
+        <div className="sideFooterNote">
+          Wilson CI + net signal fallback · min margin {MIN_MARGIN.toFixed(2)}
+        </div>
+      </aside>
 
-      <main className="grid">
-        <section className="card area-filters">
-          <div className="cardTitle">Filters</div>
+      {/* ── MAIN CONTENT ── */}
+      <div className="mainContent">
 
-          <div className="filtersGrid">
-            <div className="filtersRow filtersRow--inputs">
-              <div className="field field--topic">
-                <label>Topic</label>
-                <select className="select" value={topic} onChange={(e) => setTopic(e.target.value)}>
-                  <option value="">All topics</option>
-                  {topics.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+        {/* Search strip */}
+        <div className="searchStrip">
+          <div className="searchStripRow">
+            <div className="field field--topic">
+              <label>Topic</label>
+              <select className="select" value={topic} onChange={(e) => setTopic(e.target.value)}>
+                <option value="">All topics</option>
+                {topics.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+
+            <div className="field field--limit">
+              <label>Limit</label>
+              <input type="number" value={limit} min={1} max={5000} onChange={(e) => setLimit(Number(e.target.value))} />
+            </div>
+
+            <div className="field field--search">
+              <label>Search</label>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); load(); } }}
+                placeholder='e.g. "iphone battery", "android camera", "samsung overheating"'
+              />
+            </div>
+
+            <div className="field field--device">
+              <label>Device</label>
+              <select className="select" value={deviceFilter} onChange={(e) => setDeviceFilter(e.target.value)}>
+                <option value="any">All</option>
+                <option value="iphone">iPhone</option>
+                <option value="android">Android</option>
+                <option value="both">Both</option>
+              </select>
+            </div>
+
+            <div className="field field--source">
+              <label>Source</label>
+              <div className="sourcePills">
+                <button className={`sourcePill${source === "youtube" ? " sourcePill--active sourcePill--yt" : ""}`} onClick={() => setSource("youtube")}>YouTube</button>
+                <button className={`sourcePill${source === "twitter" ? " sourcePill--active sourcePill--x" : ""}`} onClick={() => setSource("twitter")}>X</button>
+                <button className={`sourcePill${source === "both" ? " sourcePill--active sourcePill--both" : ""}`} onClick={() => setSource("both")}>Both</button>
               </div>
+            </div>
 
-              <div className="field field--limit">
-                <label>Limit</label>
-                <input
-                  type="number"
-                  value={limit}
-                  min={1}
-                  max={5000}
-                  onChange={(e) => setLimit(Number(e.target.value))}
-                />
-              </div>
-
-              <div className="field field--search">
-                <label>Search</label>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      load();
-                    }
-                  }}
-                  placeholder='Try: "iphone battery", "android camera", "samsung overheating"'
-                />
-              </div>
-
-              <div className="field field--device">
-                <label>Device</label>
-                <select className="select" value={deviceFilter} onChange={(e) => setDeviceFilter(e.target.value)}>
-                  <option value="any">All</option>
-                  <option value="iphone">iPhone</option>
-                  <option value="android">Android</option>
-                  <option value="both">Both</option>
-                </select>
-              </div>
-
-              <div className="field field--source">
-                <label>Source</label>
-                <div className="sourcePills">
-                  <button
-                    className={`sourcePill${source === "youtube" ? " sourcePill--active sourcePill--yt" : ""}`}
-                    onClick={() => setSource("youtube")}
-                    title="Pull from YouTube comments"
-                  >
-                    ▶ YouTube
-                  </button>
-                  <button
-                    className={`sourcePill${source === "twitter" ? " sourcePill--active sourcePill--x" : ""}`}
-                    onClick={() => setSource("twitter")}
-                    title="Pull from X / Twitter"
-                  >
-                    𝕏 Twitter
-                  </button>
-                  <button
-                    className={`sourcePill${source === "both" ? " sourcePill--active sourcePill--both" : ""}`}
-                    onClick={() => setSource("both")}
-                    title="Pull from both sources"
-                  >
-                    Both
-                  </button>
-                </div>
-              </div>
-
-              <div className="field field--btn">
-                <label>&nbsp;</label>
-                <div className="btnGroup">
-                  {query.trim() ? (
-                    <>
-                      <button
-                        className="btn btn--ghost"
-                        onClick={() => load({ dbOnly: true })}
-                        disabled={loading}
-                        title="Read from your database — no API calls"
-                      >
-                        Load from DB
-                      </button>
-                      <button
-                        className={`btn btn--primary${source === "twitter" ? " btn--twitter" : source === "both" ? "" : " btn--youtube"}`}
-                        onClick={() => load()}
-                        disabled={loading}
-                        title={
-                          source === "youtube" ? "Fetch from YouTube (uses quota)"
-                          : source === "twitter" ? "Fetch from X / Twitter (uses credit)"
-                          : "Fetch from YouTube + X (uses both quotas)"
-                        }
-                      >
-                        {loading
-                          ? (loadPhase || "Searching…")
-                          : source === "youtube" ? "Search YouTube"
-                          : source === "twitter" ? "Search X"
-                          : "Search Both"}
-                      </button>
-                    </>
-                  ) : (
+            <div className="field field--btn">
+              <label>&nbsp;</label>
+              <div className="btnGroup">
+                {query.trim() ? (
+                  <>
+                    <button className="btn btn--ghost" onClick={() => load({ dbOnly: true })} disabled={loading} title="Read from database — no API calls">
+                      Load from DB
+                    </button>
                     <button
-                      className="btn btn--primary"
+                      className={`btn btn--primary${source === "twitter" ? " btn--twitter" : source === "both" ? "" : " btn--youtube"}`}
                       onClick={() => load()}
                       disabled={loading}
                     >
-                      {loading ? (loadPhase || "Loading…") : "Refresh"}
+                      {loading
+                        ? (loadPhase || "Searching…")
+                        : source === "youtube" ? "Search YouTube"
+                        : source === "twitter" ? "Search X"
+                        : "Search Both"}
                     </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="filtersRow filtersRow--meta">
-              <div className="pill metaPill">
-                <span style={{ fontWeight: 700 }}>Winner mode</span>
-                <span className="dim" style={{ marginLeft: 8 }}>
-                  Wilson confidence interval + signal fallback
-                </span>
+                  </>
+                ) : (
+                  <button className="btn btn--primary" onClick={() => load()} disabled={loading}>
+                    {loading ? (loadPhase || "Loading…") : "Refresh"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1151,302 +957,200 @@ export default function App() {
               </div>
             </div>
           )}
-        </section>
+        </div>
 
-        <section className="card card--kpi area-kpi1 card--anim" style={{ animationDelay: "0ms" }}>
-          <span className="kpiAccentBar kpiAccentBar--ip" />
-          <div className="cardTitle">iPhone</div>
-          <div className="kpiRow">
+        {/* Verdict strip */}
+        <div className={`verdictStrip${verdictDevice ? ` verdictStrip--${verdictDevice}` : ""}`}>
+          <div className="verdictLeft">
             {loading ? (
+              <div className="verdictLabel">Analyzing…</div>
+            ) : decision.label === "Not enough signal" ? (
               <>
-                <div><div className="skeleton skeleton--stat" /><div className="skeleton skeleton--sub" /></div>
-                <div className="skeleton skeleton--meta" />
+                <div className="verdictLabel">Not enough signal</div>
+                <div className="verdictDetail">{decision.detail}</div>
+              </>
+            ) : decision.label === "Even" ? (
+              <>
+                <div className="verdictLabel">Too close to call</div>
+                <div className="verdictDetail">{decision.detail}</div>
               </>
             ) : (
               <>
-                <div>
-                  <div className="statBig">{ipCountUp.toLocaleString()}</div>
-                  <div className="statSub">posts · {sumIphone.signal} signal</div>
-                  <div className="kpiRate">
-                    <span className={`sigArrow ${ipArrow.cls}`}>{ipArrow.char}</span>
-                    {ipPosRate != null && (
-                      <span className={`posRate posRate--${ipPosRate > 0.5 ? "pos" : ipPosRate < 0.45 ? "neg" : "neu"}`}>
-                        {Math.round(ipPosRate * 100)}% pos
-                      </span>
-                    )}
-                  </div>
+                <div className="verdictWinner">
+                  {decision.label === "iPhone"
+                    ? <IconPhone size={18} color="var(--ip)" />
+                    : <IconAndroid size={18} color="var(--an)" />}
+                  <span className={`verdictName verdictName--${verdictDevice}`}>{decision.label}</span>
+                  <span className="verdictLeads">leads in public sentiment</span>
                 </div>
-                <div style={{ fontSize: 20 }}>🍎</div>
-              </>
-            )}
-          </div>
-        </section>
-
-        <section className="card card--kpi area-kpi2 card--anim" style={{ animationDelay: "60ms" }}>
-          <span className="kpiAccentBar kpiAccentBar--an" />
-          <div className="cardTitle">Android</div>
-          <div className="kpiRow">
-            {loading ? (
-              <>
-                <div><div className="skeleton skeleton--stat" /><div className="skeleton skeleton--sub" /></div>
-                <div className="skeleton skeleton--meta" />
-              </>
-            ) : (
-              <>
-                <div>
-                  <div className="statBig">{anCountUp.toLocaleString()}</div>
-                  <div className="statSub">posts · {sumAndroid.signal} signal</div>
-                  <div className="kpiRate">
-                    <span className={`sigArrow ${anArrow.cls}`}>{anArrow.char}</span>
-                    {anPosRate != null && (
-                      <span className={`posRate posRate--${anPosRate > 0.5 ? "pos" : anPosRate < 0.45 ? "neg" : "neu"}`}>
-                        {Math.round(anPosRate * 100)}% pos
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ fontSize: 20 }}>🤖</div>
-              </>
-            )}
-          </div>
-        </section>
-
-        <section className="card card--kpi area-kpi3 card--anim" style={{ animationDelay: "120ms" }}>
-          <span className="kpiAccentBar kpiAccentBar--win" />
-          <div className="cardTitle">Who’s Winning</div>
-          <div className="kpiRow">
-            {loading ? (
-              <>
-                <div><div className="skeleton skeleton--stat" style={{ width: 110, height: 26 }} /><div className="skeleton skeleton--sub" /></div>
-                <div className="skeleton skeleton--meta" />
-              </>
-            ) : (
-              <>
-                <div>
-                  <div className="statBig statBig--winner" style={{
-                    color: decision.label === "iPhone" ? "var(--ip-color)"
-                         : decision.label === "Android" ? "var(--an-color)"
-                         : "var(--text)"
-                  }}>
-                    {decision.label === "iPhone" ? "🍎 iPhone"
-                   : decision.label === "Android" ? "🤖 Android"
-                   : decision.label === "Even" ? "🤝 Even"
-                   : decision.label}
-                  </div>
-                  <div className="statSub">{decision.detail}</div>
-                  {decision.confidence != null && (
-                    <div className="kpiRate">
-                      <span className="posRate posRate--pos">{fmtPct(decision.confidence)} conf.</span>
-                    </div>
-                  )}
+                <div className="verdictDetail">
+                  {decision.detail}
+                  {decision.confidence != null && ` · ${fmtPct(decision.confidence)} confidence`}
                 </div>
               </>
             )}
           </div>
-        </section>
 
-        <section className="card card--kpi area-kpi4 card--anim" style={{ animationDelay: "180ms" }}>
-          <span className="kpiAccentBar kpiAccentBar--cov" />
-          <div className="cardTitle">Coverage</div>
-          <div className="kpiRow">
-            {loading ? (
-              <>
-                <div><div className="skeleton skeleton--stat" style={{ width: 70, height: 30 }} /><div className="skeleton skeleton--sub" /></div>
-                <div className="skeleton skeleton--meta" />
-              </>
-            ) : (
-              <>
-                <div>
-                  <div className="statBig" style={{ fontSize: 32 }}>
-                    {coverage == null ? "—" : `${Math.round(coverage * 100)}%`}
-                  </div>
-                  <div className="statSub">mention iPhone or Android</div>
-                  <div className="kpiRate">
-                    <span className="posRate posRate--neu">{buckets.both.length} mention both</span>
-                  </div>
-                </div>
-                <div className="kpiMeta">{overall.total.toLocaleString()} total</div>
-              </>
-            )}
+          <div className="verdictRight">
+            <div className="verdictBarTrack">
+              <div className="verdictBarFill--ip" style={{ width: `${ipBarW}%` }} />
+              <div className="verdictBarFill--an" style={{ width: `${anBarW}%` }} />
+            </div>
+            <div className="verdictBarLegend">
+              <span className="verdictLeg--ip">{ipSignalTotal} iPhone signals</span>
+              <span className="verdictLeg--an">{anSignalTotal} Android signals</span>
+            </div>
+            <div className="verdictCoverage">
+              {coverage == null ? "No data" : `${Math.round(coverage * 100)}% coverage`} · {overall.total.toLocaleString()} posts · {buckets.both.length} mention both
+            </div>
           </div>
-        </section>
+        </div>
 
-        <section className="card card--hero area-hero">
-          <div className="cardTitle">Insights</div>
+        {/* KPI bar */}
+        <div className="kpiBar">
+          <div className="kpiCard card--anim" style={{ animationDelay: "0ms" }}>
+            <div className="kpiCardAccent kpiCardAccent--ip" />
+            <div className="kpiCardLabel">iPhone Posts</div>
+            <div className="kpiCardStat">{ipCountUp.toLocaleString()}</div>
+            <div className="kpiCardSub">{sumIphone.signal} signals</div>
+          </div>
+          <div className="kpiCard card--anim" style={{ animationDelay: "20ms" }}>
+            <div className="kpiCardAccent kpiCardAccent--an" />
+            <div className="kpiCardLabel">Android Posts</div>
+            <div className="kpiCardStat">{anCountUp.toLocaleString()}</div>
+            <div className="kpiCardSub">{sumAndroid.signal} signals</div>
+          </div>
+          <div className="kpiCard card--anim" style={{ animationDelay: "40ms" }}>
+            <div className="kpiCardAccent kpiCardAccent--win" />
+            <div className="kpiCardLabel">Leading Device</div>
+            <div className="kpiCardStat" style={{
+              fontSize: 18,
+              color: decision.label === "iPhone" ? "var(--ip)"
+                   : decision.label === "Android" ? "var(--an)"
+                   : "var(--text)"
+            }}>
+              {decision.label}
+            </div>
+            <div className="kpiCardSub">{decision.detail}</div>
+          </div>
+          <div className="kpiCard card--anim" style={{ animationDelay: "60ms" }}>
+            <div className="kpiCardAccent kpiCardAccent--cov" />
+            <div className="kpiCardLabel">Coverage</div>
+            <div className="kpiCardStat">{coverage == null ? "—" : `${Math.round(coverage * 100)}%`}</div>
+            <div className="kpiCardSub">{overall.total.toLocaleString()} total posts</div>
+          </div>
+        </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {loading && !overall.total ? (
-              <div className="dim" style={{ fontStyle: "italic", fontSize: 14 }}>Fetching latest data…</div>
-            ) : !overall.total ? (
+        {/* Charts row: trend + terms */}
+        <div className="chartsRow">
+          <section ref={sectionHero} className="chartCard section-animate">
+            {!overall.total && !loading && (
               <div className="onboardHero">
-                <div className="onboardBattle">
-                  <div className="onboardBattleSide">
-                    <div className="onboardBattleEmoji">🍎</div>
-                    <div className="onboardBattleLabel onboardBattleLabel--ip">iPhone</div>
+                <div className="onboardComparison">
+                  <div className="onboardSide">
+                    <div className="onboardDeviceIcon"><IconPhone size={22} color="var(--ip)" /></div>
+                    <div className="onboardLabel onboardLabel--ip">iPhone</div>
                   </div>
                   <div className="onboardVs">VS</div>
-                  <div className="onboardBattleSide">
-                    <div className="onboardBattleEmoji">🤖</div>
-                    <div className="onboardBattleLabel onboardBattleLabel--an">Android</div>
+                  <div className="onboardSide">
+                    <div className="onboardDeviceIcon"><IconAndroid size={22} color="var(--an)" /></div>
+                    <div className="onboardLabel onboardLabel--an">Android</div>
                   </div>
                 </div>
                 <div className="onboardSteps">
                   <div className="onboardStep">
                     <div className="onboardStepNum">1</div>
-                    <div className="onboardStepText"><strong>Enter a topic</strong> — try "iPhone 16 review" or "Samsung Galaxy S25"</div>
+                    <div className="onboardStepText"><strong>Enter a search query</strong> — try "iPhone 16 review" or "Samsung Galaxy S25"</div>
                   </div>
                   <div className="onboardStep">
                     <div className="onboardStepNum">2</div>
-                    <div className="onboardStepText"><strong>We fetch YouTube comments or X / Twitter posts</strong> using the Azure backend and score them with Azure AI Language</div>
+                    <div className="onboardStepText"><strong>Select a source</strong> — YouTube comments or X posts, scored with Azure AI Language</div>
                   </div>
                   <div className="onboardStep">
                     <div className="onboardStepNum">3</div>
-                    <div className="onboardStepText"><strong>See who wins</strong> — real positive/negative sentiment from real users, not reviews</div>
+                    <div className="onboardStepText"><strong>Review results</strong> — real sentiment from real users, not curated reviews</div>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="heroHeadline">{heroText}</div>
             )}
-
+            {overall.total > 0 && <div className="heroHeadline">{heroText}</div>}
             <TrendChart series={trend.series} granularity={trend.granularity} />
+            <div className="queryBadges">
+              <span className="badge">Rows: <b style={{ marginLeft: 4 }}>{overall.total}</b></span>
+              <span className="badge">Topic: <b style={{ marginLeft: 4 }}>{topic || "All"}</b></span>
+              <span className="badge">Search: <b style={{ marginLeft: 4 }}>{query.trim() || "—"}</b></span>
+              <span className="badge">Device: <b style={{ marginLeft: 4 }}>{deviceFilter}</b></span>
+              <span className="badge">Margin: <b style={{ marginLeft: 4 }}>{MIN_MARGIN.toFixed(2)}</b></span>
+            </div>
+          </section>
 
+          <section ref={sectionSide} className="termsCard section-animate">
+            <div className="cardTitle">Top Terms</div>
             <div className="compareGrid">
               <div className="compareCol">
-                <div className="compareTitle">Top iPhone terms</div>
+                <div className="compareTitle">
+                  <IconPhone size={12} color="var(--ip)" /> iPhone
+                </div>
                 <div className="termWrap">
-                  {iphoneTerms.length ? (
-                    iphoneTerms.map(([w, c, tone]) => (
-                      <span key={`ip-${w}`} className={`termPill termPill--${tone}`} title={`${c} mentions · sentiment: ${tone}`}>
-                        {w} <span className="termCount">{c}</span>
-                      </span>
-                    ))
-                  ) : (
-                    <div className="dim">No iPhone terms yet.</div>
-                  )}
+                  {iphoneTerms.length
+                    ? iphoneTerms.map(([w, c, tone]) => (
+                        <span key={`ip-${w}`} className={`termPill termPill--${tone}`} title={`${c} mentions · ${tone}`}>
+                          {w} <span className="termCount">{c}</span>
+                        </span>
+                      ))
+                    : <div className="dim">No iPhone terms yet.</div>}
                 </div>
               </div>
-
               <div className="compareCol">
-                <div className="compareTitle">Top Android terms</div>
+                <div className="compareTitle">
+                  <IconAndroid size={12} color="var(--an)" /> Android
+                </div>
                 <div className="termWrap">
-                  {androidTerms.length ? (
-                    androidTerms.map(([w, c, tone]) => (
-                      <span key={`an-${w}`} className={`termPill termPill--${tone}`} title={`${c} mentions · sentiment: ${tone}`}>
-                        {w} <span className="termCount">{c}</span>
-                      </span>
-                    ))
-                  ) : (
-                    <div className="dim">No Android terms yet.</div>
-                  )}
+                  {androidTerms.length
+                    ? androidTerms.map(([w, c, tone]) => (
+                        <span key={`an-${w}`} className={`termPill termPill--${tone}`} title={`${c} mentions · ${tone}`}>
+                          {w} <span className="termCount">{c}</span>
+                        </span>
+                      ))
+                    : <div className="dim">No Android terms yet.</div>}
                 </div>
               </div>
             </div>
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <span className="badge">Rows: <b style={{ marginLeft: 6 }}>{overall.total}</b></span>
-              <span className="badge">Topic: <b style={{ marginLeft: 6 }}>{topic || "All"}</b></span>
-              <span className="badge">Search: <b style={{ marginLeft: 6 }}>{query.trim() || "—"}</b></span>
-              <span className="badge">Device: <b style={{ marginLeft: 6 }}>{deviceFilter}</b></span>
-              <span className="badge">Margin: <b style={{ marginLeft: 6 }}>{MIN_MARGIN.toFixed(2)}</b></span>
+            <div className="footerHint" style={{ marginTop: "auto", paddingTop: 16 }}>
+              Signal = pos + neg after confidence gating. Neutrals excluded from leader determination.
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
-        <section className="card area-side">
-          <div className="cardTitle">Signal Mix</div>
+        {/* Donut row */}
+        <div className="donutRow">
+          <section ref={sectionIpie} className="donutRowCard section-animate">
+            <div className="cardTitle">iPhone · Sentiment Breakdown</div>
+            {loading
+              ? <div className="donutSkeletonWrap"><div className="skeleton" style={{ width: 150, height: 150, borderRadius: "50%" }} /></div>
+              : <DonutChart label="iPhone" pos={sumIphone.pos} neu={sumIphone.neu} neg={sumIphone.neg} />}
+          </section>
+          <section ref={sectionApie} className="donutRowCard section-animate">
+            <div className="cardTitle">Android · Sentiment Breakdown</div>
+            {loading
+              ? <div className="donutSkeletonWrap"><div className="skeleton" style={{ width: 150, height: 150, borderRadius: "50%" }} /></div>
+              : <DonutChart label="Android" pos={sumAndroid.pos} neu={sumAndroid.neu} neg={sumAndroid.neg} />}
+          </section>
+        </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="signalBlock">
-              <div className="signalBlockName signalBlockName--ip">🍎 iPhone</div>
-              <div className="signalBars">
-                <div className="signalBarRow">
-                  <span className="signalBarLabel">Pos</span>
-                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--pos" style={{ width: sumIphone.total ? `${sumIphone.pos / sumIphone.total * 100}%` : "0%" }} /></div>
-                  <span className="signalBarCount">{sumIphone.pos}</span>
-                </div>
-                <div className="signalBarRow">
-                  <span className="signalBarLabel">Neu</span>
-                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neu" style={{ width: sumIphone.total ? `${sumIphone.neu / sumIphone.total * 100}%` : "0%" }} /></div>
-                  <span className="signalBarCount">{sumIphone.neu}</span>
-                </div>
-                <div className="signalBarRow">
-                  <span className="signalBarLabel">Neg</span>
-                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neg" style={{ width: sumIphone.total ? `${sumIphone.neg / sumIphone.total * 100}%` : "0%" }} /></div>
-                  <span className="signalBarCount">{sumIphone.neg}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="signalBlock">
-              <div className="signalBlockName signalBlockName--an">🤖 Android</div>
-              <div className="signalBars">
-                <div className="signalBarRow">
-                  <span className="signalBarLabel">Pos</span>
-                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--pos" style={{ width: sumAndroid.total ? `${sumAndroid.pos / sumAndroid.total * 100}%` : "0%" }} /></div>
-                  <span className="signalBarCount">{sumAndroid.pos}</span>
-                </div>
-                <div className="signalBarRow">
-                  <span className="signalBarLabel">Neu</span>
-                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neu" style={{ width: sumAndroid.total ? `${sumAndroid.neu / sumAndroid.total * 100}%` : "0%" }} /></div>
-                  <span className="signalBarCount">{sumAndroid.neu}</span>
-                </div>
-                <div className="signalBarRow">
-                  <span className="signalBarLabel">Neg</span>
-                  <div className="signalBarTrack"><div className="signalBarFill signalBarFill--neg" style={{ width: sumAndroid.total ? `${sumAndroid.neg / sumAndroid.total * 100}%` : "0%" }} /></div>
-                  <span className="signalBarCount">{sumAndroid.neg}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="footerHint" style={{ marginTop: 4 }}>
-              Signal = pos + neg after confidence gating. Neutrals don’t decide winners.
-            </div>
-          </div>
-        </section>
-
-        <section className="card area-ipie">
-          <div className="cardTitle">iPhone · Sentiment breakdown</div>
-          {loading ? (
-            <div className="donutSkeletonWrap">
-              <div className="skeleton" style={{ width: 160, height: 160, borderRadius: "50%" }} />
-            </div>
-          ) : (
-            <DonutChart label="iPhone" pos={sumIphone.pos} neu={sumIphone.neu} neg={sumIphone.neg} />
-          )}
-        </section>
-
-        <section className="card area-apie">
-          <div className="cardTitle">Android · Sentiment breakdown</div>
-          {loading ? (
-            <div className="donutSkeletonWrap">
-              <div className="skeleton" style={{ width: 160, height: 160, borderRadius: "50%" }} />
-            </div>
-          ) : (
-            <DonutChart label="Android" pos={sumAndroid.pos} neu={sumAndroid.neu} neg={sumAndroid.neg} />
-          )}
-        </section>
-
-        <section className="card area-table">
+        {/* Table */}
+        <section ref={sectionTable} className="tableSection section-animate">
           <div className="tableHeader">
             <div className="cardTitle" style={{ marginBottom: 0 }}>Recent Scored Posts</div>
             <div className="tableToolbar">
               <div className="sentFilterPills">
                 {[["all","All"],["positive","Positive"],["neutral","Neutral"],["negative","Negative"]].map(([v, label]) => (
-                  <button
-                    key={v}
-                    className={`sentPill sentPill--${v}${sentFilter === v ? " sentPill--active" : ""}`}
-                    onClick={() => setSentFilter(v)}
-                  >
+                  <button key={v} className={`sentPill sentPill--${v}${sentFilter === v ? " sentPill--active" : ""}`} onClick={() => setSentFilter(v)}>
                     {label}
                   </button>
                 ))}
               </div>
-              <select
-                className="pageSizeSelect"
-                value={pageSize}
-                onChange={e => { setPageSize(Number(e.target.value)); setTablePage(1); }}
-              >
+              <select className="pageSizeSelect" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setTablePage(1); }}>
                 <option value={10}>10 / page</option>
                 <option value={25}>25 / page</option>
                 <option value={50}>50 / page</option>
@@ -1468,7 +1172,6 @@ export default function App() {
                   <th>Text</th>
                 </tr>
               </thead>
-
               <tbody>
                 {pageRows.map((r, idx) => {
                   const s = getScores(r);
@@ -1481,52 +1184,27 @@ export default function App() {
                         {r.platform === "twitter"
                           ? <span className="platformBadge platformBadge--x">𝕏</span>
                           : r.platform === "youtube"
-                          ? <span className="platformBadge platformBadge--yt">▶</span>
+                          ? <span className="platformBadge platformBadge--yt">YT</span>
                           : <span className="platformBadge">{r.platform || "—"}</span>}
                       </td>
                       <td>{r.topic || ""}</td>
                       <td className="dim">{labelForBucket(classifyDevice(r?.clean_text || ""))}</td>
-                      <td><Badge label={stable} /></td>
+                      <td><SentimentTag label={stable} /></td>
                       <td className="scoreCell">
                         <span className="scoreVal scoreVal--pos">P:{fmt(s.positive)}</span>
                         <span className="scoreVal scoreVal--neu">N:{fmt(s.neutral)}</span>
-                        <span className="scoreVal scoreVal--neg">-:{fmt(s.negative)}</span>
+                        <span className="scoreVal scoreVal--neg">Ng:{fmt(s.negative)}</span>
                       </td>
-                      <td className="textCell" title={r.clean_text || ""}>{r.clean_text || ""}</td>
+                      <td className="textCell">{r.clean_text || r.text || ""}</td>
                     </tr>
                   );
                 })}
-
-                {!loading && filteredRows.length === 0 && rows.length > 0 && (
+                {!pageRows.length && (
                   <tr>
-                    <td colSpan="7">
-                      <div className="emptyState">
-                        <div className="emptyStateIcon">🔍</div>
-                        <div className="emptyStateText">No {sentFilter} posts</div>
-                        <div className="emptyStateSub">Try a different sentiment filter</div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-
-                {!loading && rows.length === 0 && (
-                  <tr>
-                    <td colSpan="7">
-                      <div className="emptyState">
-                        <div className="emptyStateIcon">📊</div>
-                        <div className="emptyStateText">No data yet</div>
-                        <div className="emptyStateSub">Enter a search query and click Search YouTube, Search X, or Search Both</div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-
-                {loading && (
-                  <tr>
-                    <td colSpan="7">
-                      <div className="emptyState">
-                        <div className="emptyStateText" style={{ color: "var(--muted)" }}>{loadPhase || "Loading…"}</div>
-                      </div>
+                    <td colSpan={7} className="tableEmpty">
+                      {loading ? "Loading…"
+                        : filteredRows.length === 0 && rows.length > 0 ? "No posts match this filter."
+                        : "No data yet — run a search above."}
                     </td>
                   </tr>
                 )}
@@ -1534,42 +1212,25 @@ export default function App() {
             </table>
           </div>
 
-          {filteredRows.length > 0 && (
-            <div className="tablePager">
-              <div className="tableInfo">
-                {sentFilter !== "all" && (
-                  <span className="tableFilterNote">{sentFilter} only · </span>
-                )}
-                Showing {((safePage - 1) * pageSize + 1).toLocaleString()}–{Math.min(safePage * pageSize, filteredRows.length).toLocaleString()} of {filteredRows.length.toLocaleString()}
-                {sentFilter !== "all" && rows.length !== filteredRows.length && (
-                  <span className="tableFilterNote"> ({rows.length.toLocaleString()} total)</span>
-                )}
-              </div>
-              <div className="pagerControls">
-                <button className="pagerBtn" onClick={() => setTablePage(1)} disabled={safePage === 1} title="First">«</button>
-                <button className="pagerBtn" onClick={() => setTablePage(p => p - 1)} disabled={safePage === 1} title="Previous">‹</button>
-                {getPageNums(safePage, pageCount).map((n, i) =>
-                  n === "..." ? (
-                    <span key={`dots-${i}`} className="pagerDots">…</span>
-                  ) : (
-                    <button
-                      key={n}
-                      className={`pagerBtn${n === safePage ? " pagerBtn--active" : ""}`}
-                      onClick={() => setTablePage(n)}
-                    >
-                      {n}
-                    </button>
-                  )
-                )}
-                <button className="pagerBtn" onClick={() => setTablePage(p => p + 1)} disabled={safePage === pageCount} title="Next">›</button>
-                <button className="pagerBtn" onClick={() => setTablePage(pageCount)} disabled={safePage === pageCount} title="Last">»</button>
-              </div>
+          {pageCount > 1 && (
+            <div className="pagination">
+              <button className="pageBtn" onClick={() => setTablePage(p => Math.max(1, p - 1))} disabled={safePage <= 1}>‹</button>
+              {getPageNums(safePage, pageCount).map((p, i) =>
+                p === "..." ? <span key={`e-${i}`} className="pageEllipsis">…</span>
+                  : <button key={p} className={`pageBtn${safePage === p ? " pageBtn--active" : ""}`} onClick={() => setTablePage(p)}>{p}</button>
+              )}
+              <button className="pageBtn" onClick={() => setTablePage(p => Math.min(pageCount, p + 1))} disabled={safePage >= pageCount}>›</button>
+              <span className="pageInfo">{(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, filteredRows.length)} of {filteredRows.length}</span>
             </div>
           )}
-
-          <div className="footerHint">{overall.total.toLocaleString()} total rows loaded · {pageCount} page{pageCount !== 1 ? "s" : ""}</div>
         </section>
-      </main>
+
+        <footer className="pageFooter">
+          <span className="footerBrand">Sentiment OS</span>
+          <span className="footerMid">Public opinion intelligence · iPhone vs. Android</span>
+          <span className="footerRight">Powered by Azure AI Language · Data from YouTube & X</span>
+        </footer>
+      </div>
     </div>
   );
 }

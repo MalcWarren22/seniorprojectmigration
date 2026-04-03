@@ -24,7 +24,6 @@ variable "vnet_address_space" {
   default = [ "172.20.10.0/24" ]
   # Range = 255.255.255.0  0 - 254 to play with
 }
-
 variable "function_subnet_cidr" {
   type = list(string)
   default = [ "172.20.10.0/27" ]

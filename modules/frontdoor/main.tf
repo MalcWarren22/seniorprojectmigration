@@ -98,7 +98,7 @@ resource "azurerm_cdn_frontdoor_route" "funcapi" {
   resource "azurerm_cdn_frontdoor_firewall_policy" "this" {
     resource_group_name = var.resource_group_name
     name = "fdsentwaf"
-    mode = "Detection"
+    mode = "Prevention"
     sku_name = "Premium_AzureFrontDoor"
     enabled = true
 

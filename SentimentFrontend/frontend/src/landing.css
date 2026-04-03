@@ -1,0 +1,73 @@
+@tailwind components;
+@tailwind utilities;
+
+/* Landing-page-specific resets & overrides */
+.landing-root {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+.landing-root *, .landing-root *::before, .landing-root *::after {
+  box-sizing: border-box;
+}
+
+/* Smooth scroll */
+.landing-root {
+  scroll-behavior: smooth;
+}
+
+/* Fade-up animation for sections */
+.fade-up {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+.fade-up.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Product card glow */
+.card-glow {
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 32px 64px rgba(0,0,0,0.4);
+}
+
+/* Navbar backdrop */
+.nav-blur {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Subtle grid pattern for hero */
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Feature card hover */
+.feature-card {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.feature-card:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 24px rgba(37, 99, 235, 0.08);
+}
+
+/* Step connector line */
+.step-line::after {
+  content: '';
+  position: absolute;
+  left: 19px;
+  top: 40px;
+  bottom: -16px;
+  width: 1px;
+  background: #e2e8f0;
+}
+.step-line:last-child::after {
+  display: none;
+}
