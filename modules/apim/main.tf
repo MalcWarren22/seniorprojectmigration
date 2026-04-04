@@ -61,3 +61,48 @@ resource_group_name = var.resource_group_name
 </policies>
 XML
 }
+
+resource "azurerm_api_management_api_operation" "health" {
+  operation_id        = "health-get"
+  api_name            = azurerm_api_management_api.this.name
+  api_management_name = azurerm_api_management.this.name
+  resource_group_name = var.resource_group_name
+
+  display_name = "Get Health"
+  method       = "GET"
+  url_template = "/health"
+
+  response {
+    status_code = 200
+  }
+}
+
+resource "azurerm_api_management_api_operation" "topics" {
+  operation_id        = "topics-get"
+  api_name            = azurerm_api_management_api.this.name
+  api_management_name = azurerm_api_management.this.name
+  resource_group_name = var.resource_group_name
+
+  display_name = "Get Topics"
+  method       = "GET"
+  url_template = "/topics"
+
+  response {
+    status_code = 200
+  }
+}
+
+resource "azurerm_api_management_api_operation" "recent" {
+  operation_id        = "recent-get"
+  api_name            = azurerm_api_management_api.this.name
+  api_management_name = azurerm_api_management.this.name
+  resource_group_name = var.resource_group_name
+
+  display_name = "Get Recent"
+  method       = "GET"
+  url_template = "/recent"
+
+  response {
+    status_code = 200
+  }
+}
