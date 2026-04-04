@@ -1,4 +1,3 @@
-# backend/__init__.py (Azure Functions)
 import os
 import json
 import re
@@ -8,13 +7,6 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import azure.functions as func
-import pyodbc
-import requests
-from requests.adapters import HTTPAdapter, Retry
-
-from azure.ai.textanalytics import TextAnalyticsClient
-from azure.core.exceptions import HttpResponseError
-from azure.identity import DefaultAzureCredential
 
 app = func.FunctionApp()
 
@@ -35,18 +27,13 @@ DEFAULT_TWITTER_QUERY = "iphone OR android OR samsung"
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_COMMENTS_URL = "https://www.googleapis.com/youtube/v3/commentThreads"
 
-TWITTER_MAX_RESULTS = 100   # X API v2 max per single request (Basic tier)
+TWITTER_MAX_RESULTS = 100
 
 MAX_TA_CHARS = 4500
 
-# Margin used ONLY for pos vs neg decisioning (neutral does NOT auto-win)
 SENTIMENT_MIN_MARGIN = float(os.getenv("SENTIMENT_MIN_MARGIN", "0.05"))
-
-# Dev backfill: rescore rows that have missing/empty scores.
 BACKFILL_ENABLE = (os.getenv("BACKFILL_ENABLE", "1").strip().lower() in ("1", "true", "yes", "on"))
-BACKFILL_MAX_PER_REQUEST = int(os.getenv("BACKFILL_MAX_PER_REQUEST", "75"))  # you set 500, but cap safely here
-
-# Queue task caps (per ingest request)
+BACKFILL_MAX_PER_REQUEST = int(os.getenv("BACKFILL_MAX_PER_REQUEST", "75"))
 QUEUE_TASK_MAX_VIDEOS = int(os.getenv("QUEUE_TASK_MAX_VIDEOS", "10"))
 
 # ----------------------------
@@ -97,7 +84,7 @@ def safe_int(value: Any, default: int, min_v: int, max_v: int) -> int:
 def safe_float(value: Any, default: float, min_v: float, max_v: float) -> float:
     try:
         x = float(value)
-        if not (x == x):  # NaN
+        if not (x == x):
             return default
         return max(min_v, min(x, max_v))
     except Exception:
@@ -141,8 +128,6 @@ def clean_text(text: str) -> str:
     return t
 
 def is_likely_non_english(text: str) -> bool:
-    """Returns True if more than 35% of characters are non-ASCII — used to skip
-    tweets that slipped through the lang:en API filter."""
     t = (text or "").strip()
     if not t:
         return True
@@ -175,14 +160,17 @@ def normalize_topic(value: Optional[str]) -> str:
     return v
 
 # ----------------------------
-# Requests session (retry)
+# Requests session (lazy import)
 # ----------------------------
-_session: Optional[requests.Session] = None
+_session = None
 
-def get_session() -> requests.Session:
+def get_session():
     global _session
     if _session is not None:
         return _session
+
+    import requests
+    from requests.adapters import HTTPAdapter, Retry
 
     s = requests.Session()
     retries = Retry(
@@ -201,11 +189,13 @@ def get_session() -> requests.Session:
     return _session
 
 # ----------------------------
-# SQL helpers (Azure SQL)
+# SQL helpers (lazy import)
 # ----------------------------
 _sql_schema_ready = False
 
-def get_sql_conn() -> pyodbc.Connection:
+def get_sql_conn():
+    import pyodbc
+
     conn_str = get_required_env("SQLCON")
     return pyodbc.connect(conn_str)
 
@@ -336,14 +326,17 @@ def fetch_topics(limit: int = 200) -> List[str]:
     return out
 
 # ----------------------------
-# Azure AI Language (Text Analytics) - Managed Identity
+# Azure AI Language (lazy import)
 # ----------------------------
-_text_client: Optional[TextAnalyticsClient] = None
+_text_client = None
 
-def get_text_analytics_client() -> TextAnalyticsClient:
+def get_text_analytics_client():
     global _text_client
     if _text_client is not None:
         return _text_client
+
+    from azure.ai.textanalytics import TextAnalyticsClient
+    from azure.identity import DefaultAzureCredential
 
     endpoint = get_required_env("AI_LANGUAGE_ENDPOINT").rstrip("/")
     credential = DefaultAzureCredential()
@@ -400,9 +393,8 @@ def sentiment_from_scores(scores: Dict[str, float], min_margin: float) -> str:
     return "positive" if p > neg else "negative"
 
 def ai_language_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[str, float]]:
-    """
-    Azure AI Language sentiment. We DO NOT force language.
-    """
+    from azure.core.exceptions import HttpResponseError
+
     t = safe_for_text_analytics(text)
     if not t or looks_like_garbage(t):
         return "neutral", {"positive": 0.0, "neutral": 1.0, "negative": 0.0}
@@ -431,82 +423,55 @@ def ai_language_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dic
     return label, scores
 
 # ----------------------------
-# Fallback sentiment (lexicon) + Hybrid policy (fix "all neutral" issue)
+# Fallback sentiment
 # ----------------------------
 _POS_WORDS = {
-    # Core positive
     "love","loved","like","liked","enjoy","enjoyed","enjoys",
     "great","good","amazing","awesome","excellent","best","better","brilliant",
     "perfect","nice","solid","fantastic","wonderful","superb","outstanding",
     "impressive","incredible","unbelievable","insane","phenomenal","exceptional",
-    # Feel / experience
     "happy","satisfied","pleased","glad","thrilled","excited","stoked",
     "favorite","favourite","clean","elegant","beautiful","gorgeous","stunning",
-    # Performance
     "smooth","fast","quick","snappy","speedy","fluid","responsive","reliable",
     "stable","powerful","efficient","seamless","flawless","crisp",
-    # Value
     "worth","worthwhile","affordable","value","deal","recommend","recommended",
-    # Improvement
     "improved","improvement","upgraded","upgrade","fixed","works","working",
-    # Winning
     "wins","winning","winner","leads","ahead","dominates","superior","top",
-    # Modern slang
     "fire","goated","banger","peak","clutch","based","slaps","bussin","lowkey",
-    # Tech-specific positives
     "innovative","intuitive","premium","polished","refined","versatile","ecosystem",
-    # Camera / display quality
     "sharp","vibrant","vivid","clear","detailed","accurate","natural","bright",
     "colorful","colourful","lifelike","realistic","balanced","rich","punchy",
     "dynamic","lush","brilliant",
-    # Battery / endurance
     "lasts","lasting","endurance","longevity","durable","long-lasting","allday",
     "allnight","reliable","charges","charged","charges fast","fast charge",
-    # Build / feel
     "premium","sturdy","solid","satisfying","comfortable","lightweight","sleek",
     "buttery","buttery smooth",
 }
 _NEG_WORDS = {
-    # Core negative
     "hate","hated","hates","dislike","disliked","despise","loathe",
     "bad","terrible","awful","worst","worse","horrible","dreadful","atrocious","abysmal",
     "pathetic","disgusting","appalling",
-    # Quality
     "trash","garbage","junk","rubbish","crap","worthless","useless","pointless",
     "cheap","flimsy","fragile","plastic","toyish",
-    # Problems
     "bug","bugs","buggy","glitch","glitchy","broken","break","breaking","fails",
     "failed","failure","error","errors","corrupt","corrupted",
-    # Performance
     "slow","lag","laggy","sluggish","choppy","stutters","stuttering","freezes",
     "frozen","clunky","heavy","bloat","bloatware",
-    # Heat / hardware
     "overheat","overheating","overheated","hot","burning","throttle","throttling",
-    # Crashes
     "crash","crashes","crashing","crashed","restart","reboots","bricked","dead",
-    # Issues
     "problem","problems","issue","issues","flaw","flaws","defect","defects",
-    # Annoyance
     "sucks","suck","annoying","frustrating","frustration","infuriating","painful",
     "ridiculous","absurd","stupid","idiotic","embarrassing",
-    # Unusable
     "unusable","unacceptable","unreliable","unstable","inconsistent",
-    # Value
     "expensive","overpriced","ripoff","rip-off","scam","waste","regret","regrets",
-    # Disappointment
     "disappointed","disappointing","underwhelming","mediocre","forgettable","meh",
-    # Modern slang
     "mid","trash","nah","nahhh","bruh","smh","yikes",
-    # Tech-specific
     "outdated","obsolete","limited","locked","restricted","proprietary",
-    # Camera / display negatives
     "blurry","blurred","grainy","muddy","washed","washed-out","overexposed",
     "underexposed","noisy","noise","artifacting","oversharpened","distorted",
     "pixelated","dull","dim","lifeless","inaccurate","oversaturated","ugly",
-    # Battery / charging negatives
     "drains","draining","drained","dies","dying","depletes","dwindles",
     "short","shortlived","unreliable","inconsistent","weak",
-    # Overrated / hype
     "overrated","overhyped","gimmick","gimmicky","pointless","unnecessary",
 }
 _NEGATORS = {
@@ -519,7 +484,6 @@ _INTENSIFIERS = {
     "super","ultra","genuinely","truly","seriously","literally","way","much","far",
 }
 _NEUTRAL_ANCHORS = {
-    # Mild / ambiguous words that signal no strong opinion
     "fine","okay","ok","decent","alright","acceptable","passable","adequate","fair",
     "average","ordinary","normal","standard","moderate","reasonable","neutral",
     "depends","depending","subjective","mixed","both","either","whatever","maybe",
@@ -560,8 +524,6 @@ def lexicon_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[st
 
     total = pos + neg
     if total == 0:
-        # If neutral anchor words are present with no directional signal,
-        # return a confident neutral rather than a drawable 0.15/0.15 split.
         if anchor_count >= 1:
             scores = {"positive": 0.05, "neutral": 0.90, "negative": 0.05}
         else:
@@ -569,9 +531,8 @@ def lexicon_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[st
         scores = _coerce_scores(scores)
         return sentiment_from_scores(scores, min_margin=min_margin), scores
 
-    strength = min(1.0, total / 6.0)      # 0..1
-    neutral = 1.0 - (0.75 * strength)     # 1..0.25
-    # Neutral anchors dampen the directional strength slightly
+    strength = min(1.0, total / 6.0)
+    neutral = 1.0 - (0.75 * strength)
     if anchor_count >= 2:
         neutral = min(1.0, neutral + 0.10)
     remaining = 1.0 - neutral
@@ -589,26 +550,16 @@ def _azure_is_dead_neutral(scores: Dict[str, float]) -> bool:
     return (neu >= 0.92) and (p <= 0.04) and (n <= 0.04)
 
 def _azure_is_tied(scores: Dict[str, float]) -> bool:
-    """Azure returned pos ≈ neg (exact or near-tie from 0.25-step rounding)."""
     p = float(scores.get("positive") or 0.0)
     n = float(scores.get("negative") or 0.0)
     return abs(p - n) < 0.02
 
 def _lexicon_is_decisive(s2: Dict[str, float], threshold: float = 0.06) -> bool:
-    """Lexicon result has a clear directional signal worth trusting."""
     p2 = float(s2.get("positive", 0.0))
     n2 = float(s2.get("negative", 0.0))
     return abs(p2 - n2) >= threshold
 
 def hybrid_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[str, float]]:
-    """
-    Try Azure; fall back to lexicon when Azure gives a dead-neutral or tied result.
-    Dead-neutral: neu >= 0.92 (Azure literally has no opinion).
-    Tied: abs(pos - neg) < 0.02, i.e. Azure's 0.25-step scoring produced an exact
-    tie such as {pos:0.25, neu:0.50, neg:0.25} — lexicon breaks the tie.
-    Neutral-anchor override: if lexicon detects only neutral-anchor words (neu >= 0.85)
-    and Azure's directional lead is weak (< 0.40), defer to lexicon's neutral call.
-    """
     label, scores = ai_language_sentiment_one(text, min_margin=min_margin)
 
     if _azure_is_dead_neutral(scores) or (label == "neutral" and _azure_is_tied(scores)):
@@ -628,13 +579,6 @@ def hybrid_sentiment_one(text: str, *, min_margin: float) -> Tuple[str, Dict[str
 def ai_language_sentiment_batch(
     texts: List[str], *, min_margin: float
 ) -> List[Tuple[str, Dict[str, float]]]:
-    """
-    Score a list of pre-cleaned texts using Azure AI Language with batches of up to 10
-    (the API limit per call). Applies the same hybrid policy as hybrid_sentiment_one:
-    lexicon fallback for dead-neutral/tied Azure results, and neutral-anchor override
-    for weak Azure signals.
-    Returns a list of (label, scores) in the same order as the input.
-    """
     BATCH_SIZE = 10
     _neutral_default = ("neutral", {"positive": 0.0, "neutral": 1.0, "negative": 0.0})
 
@@ -642,7 +586,7 @@ def ai_language_sentiment_batch(
     client = get_text_analytics_client()
 
     for i in range(0, len(texts), BATCH_SIZE):
-        batch = texts[i: i + BATCH_SIZE]
+        batch = texts[i:i + BATCH_SIZE]
         try:
             responses = list(client.analyze_sentiment(documents=batch))
             for res in responses:
@@ -651,7 +595,7 @@ def ai_language_sentiment_batch(
                     continue
                 s = _coerce_scores({
                     "positive": float(res.confidence_scores.positive),
-                    "neutral":  float(res.confidence_scores.neutral),
+                    "neutral": float(res.confidence_scores.neutral),
                     "negative": float(res.confidence_scores.negative),
                 })
                 azure_out.append((sentiment_from_scores(s, min_margin=min_margin), s))
@@ -678,13 +622,7 @@ def ai_language_sentiment_batch(
 
     return final
 
-
 def hybrid_label_from_stored(text: str, scores: Dict[str, float], *, min_margin: float) -> str:
-    """
-    Re-derive the label for a row that already has stored Azure scores.
-    If the stored scores are tied, try the lexicon as a tiebreaker
-    (avoids an extra Azure API call while still improving the label).
-    """
     label = sentiment_from_scores(scores, min_margin=min_margin)
     if label == "neutral" and _azure_is_tied(scores) and text:
         l2, s2 = lexicon_sentiment_one(text, min_margin=min_margin)
@@ -693,7 +631,7 @@ def hybrid_label_from_stored(text: str, scores: Dict[str, float], *, min_margin:
     return label
 
 # ----------------------------
-# fetch_recent with hard normalization + DEV BACKFILL
+# fetch_recent
 # ----------------------------
 def fetch_recent(
     limit: int,
@@ -804,7 +742,6 @@ def fetch_recent(
             "created_at": created_at_val,
         })
 
-    # Backfill rows missing scores (or broken JSON) so your UI starts getting pos/neg immediately.
     if backfill_missing and BACKFILL_ENABLE and to_backfill:
         batch_cap = max(1, min(BACKFILL_MAX_PER_REQUEST, len(to_backfill)))
         batch = to_backfill[:batch_cap]
@@ -916,9 +853,6 @@ def youtube_fetch_comments(video_id: str, max_results: int = 500) -> List[Dict[s
 
     return out
 
-# ----------------------------
-# Queue task building (per-video task)
-# ----------------------------
 def build_youtube_video_tasks(
     *,
     topic: str,
@@ -950,22 +884,16 @@ def build_youtube_video_tasks(
 # ----------------------------
 # Twitter / X helpers
 # ----------------------------
-
 def _get_twitter_client():
-    """
-    Returns a tweepy.Client.
-    Prefers TWITTER_BEARER_TOKEN (app-only, best for search_recent_tweets).
-    Falls back to OAuth 1.0a if all four credentials are present.
-    """
-    import tweepy  # lazy import — only required if Twitter is used
+    import tweepy
 
     bearer = (os.getenv("TWITTER_BEARER_TOKEN") or "").strip() or None
     if bearer:
         return tweepy.Client(bearer_token=bearer, wait_on_rate_limit=False)
 
-    api_key    = (os.getenv("TWITTER_API_KEY") or "").strip() or None
+    api_key = (os.getenv("TWITTER_API_KEY") or "").strip() or None
     api_secret = (os.getenv("TWITTER_API_KEY_SECRET") or "").strip() or None
-    acc_token  = (os.getenv("TWITTER_ACCESS_TOKEN") or "").strip() or None
+    acc_token = (os.getenv("TWITTER_ACCESS_TOKEN") or "").strip() or None
     acc_secret = (os.getenv("TWITTER_ACCESS_TOKEN_SECRET") or "").strip() or None
 
     if api_key and api_secret and acc_token and acc_secret:
@@ -983,13 +911,7 @@ def _get_twitter_client():
         "or all four OAuth 1.0a env vars."
     )
 
-
 def twitter_fetch_tweets(query: str, max_results: int = TWITTER_MAX_RESULTS) -> List[Dict[str, Any]]:
-    """
-    Fetch recent tweets via X API v2 search_recent_tweets.
-    Automatically appends lang:en and -is:retweet to the query unless already present.
-    Returns records in the same shape as youtube_fetch_comments.
-    """
     import tweepy
 
     max_results = safe_int(max_results, TWITTER_MAX_RESULTS, 10, TWITTER_MAX_RESULTS)
@@ -1046,7 +968,6 @@ def twitter_fetch_tweets(query: str, max_results: int = TWITTER_MAX_RESULTS) -> 
     logger.info("twitter_fetch_tweets: %d tweets for query=%r", len(out), safe_q)
     return out
 
-
 def build_twitter_search_task(*, topic: str, query: str, max_results: int) -> str:
     task = {
         "type": "twitter_search",
@@ -1056,7 +977,6 @@ def build_twitter_search_task(*, topic: str, query: str, max_results: int) -> st
         "ingested_at": utc_now_iso(),
     }
     return json.dumps(task, ensure_ascii=False)
-
 
 # ----------------------------
 # 1) Timer: ingest (to queue)
@@ -1103,7 +1023,6 @@ def process_queue(msg: func.QueueMessage) -> None:
         logger.exception("process_queue failed (swallowed): %s", e)
         return
 
-
 def _process_youtube_video(payload: Dict[str, Any]) -> None:
     topic = normalize_topic(payload.get("topic"))
     video_id = (payload.get("videoId") or "").strip()
@@ -1144,7 +1063,6 @@ def _process_youtube_video(payload: Dict[str, Any]) -> None:
             sentiment_label=label,
             sentiment_scores_json=json.dumps(scores, ensure_ascii=False),
         )
-
 
 def _process_twitter_search(payload: Dict[str, Any]) -> None:
     topic = normalize_topic(payload.get("topic"))
@@ -1306,14 +1224,8 @@ def ingest_youtube(req: func.HttpRequest, outmsg: func.Out[List[str]]) -> func.H
         logger.exception("ingest_youtube failed: %s", e)
         return func.HttpResponse(f"ingest_youtube failed: {type(e).__name__}: {e}", status_code=500)
 
-
 @app.route(route="twitter/search", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def twitter_search(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Synchronous Twitter/X search: fetch → clean → batch-score → upsert → return rows.
-    Returns scored rows in the same shape as /recent so the frontend can use them directly.
-    No queue involved — results are available immediately in the response.
-    """
     try:
         try:
             body = req.get_json()
@@ -1398,14 +1310,8 @@ def twitter_search(req: func.HttpRequest) -> func.HttpResponse:
         logger.exception("twitter_search failed: %s", e)
         return func.HttpResponse(f"twitter_search failed: {type(e).__name__}: {e}", status_code=500)
 
-
 @app.route(route="youtube/search", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def youtube_search(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Synchronous YouTube search: find videos → fetch comments → clean → batch-score → upsert → return rows.
-    Returns scored rows in the same shape as /recent so the frontend can use them directly.
-    No queue involved — results are available immediately in the response.
-    """
     try:
         try:
             body = req.get_json()
@@ -1499,7 +1405,6 @@ def youtube_search(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.exception("youtube_search failed: %s", e)
         return func.HttpResponse(f"youtube_search failed: {type(e).__name__}: {e}", status_code=500)
-
 
 @app.route(route="ingest/twitter", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.queue_output(arg_name="outmsg", queue_name="ingest-queue", connection="AzureWebJobsStorage")
