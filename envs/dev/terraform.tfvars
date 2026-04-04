@@ -14,3 +14,10 @@ kv_name                     = "sentanalysis-kv33"
 ai_language_key_secret_name = "ai-language-key-dev"
 
 sqlcon_secret_name = "sql-conn-dev"
+
+publisher_name   = "Malcolm Warren"
+publisher_email  = "bowvase@gmail.com"
+apim_sku_name    = "Developer_1"
+api_path         = "sentiment"
+backend_url      = "http://functapp-dev-sentimentanalysisproject.azurewebsites.net/api"
+api_display_name = "Sentiment Analysis API"

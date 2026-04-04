@@ -52,3 +52,27 @@ variable "sql_admins_group_name" {
 variable "sql_admins_group_object_id" {
   type = string
 }
+
+variable "publisher_name" {
+  type = string
+}
+
+variable "publisher_email" {
+  type = string
+}
+
+variable "apim_sku_name" {
+  type = string
+}
+
+variable "api_display_name" {
+  type = string
+}
+
+variable "backend_url" {
+  type = string
+}
+
+variable "api_path" {
+  type = string
+}

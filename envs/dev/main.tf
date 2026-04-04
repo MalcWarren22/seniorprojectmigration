@@ -73,6 +73,19 @@ module "observability" {
   project_name        = var.project_name
 }
 
+module "apim" {
+  source              = "../../modules/apim"
+  resource_group_name = azurerm_resource_group.this.name
+  environment         = var.environment
+  location            = var.location
+  project_name        = var.project_name
+  publisher_name      = var.publisher_name
+  publisher_email     = var.publisher_email
+  apim_sku_name       = var.apim_sku_name
+  api_display_name    = var.api_display_name
+  backend_url         = var.backend_url
+  api_path            = var.api_path
+}
 module "monitor-fd-diagnostics" {
   source                     = "../../modules/diagnostics"
   diagnostic_name            = "monitor-fd"
