@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import "./landing.css";
 
 /* ─── Scroll animation hook ─── */
@@ -9,7 +10,10 @@ function useFadeUp() {
     if (!el) return;
     const obs = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) { el.classList.add("visible"); obs.disconnect(); }
+        if (entry.isIntersecting) {
+          el.classList.add("visible");
+          obs.disconnect();
+        }
       },
       { threshold: 0.1 }
     );
@@ -57,7 +61,11 @@ function IconDatabase({ className = "w-5 h-5" }) {
 function IconShield({ className = "w-5 h-5" }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+      />
     </svg>
   );
 }
@@ -75,7 +83,6 @@ function IconClock({ className = "w-5 h-5" }) {
 function ProductMockup() {
   return (
     <div className="bg-slate-900 rounded-xl border border-slate-700/60 p-5 card-glow w-full max-w-sm mx-auto lg:mx-0">
-      {/* Header bar */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -84,7 +91,6 @@ function ProductMockup() {
         <span className="text-[10px] text-slate-600 font-mono">Updated 2m ago</span>
       </div>
 
-      {/* Verdict */}
       <div className="mb-4 p-3 bg-slate-800/70 rounded-lg border border-slate-700/50">
         <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Verdict</div>
         <div className="flex items-center gap-2">
@@ -93,7 +99,6 @@ function ProductMockup() {
         </div>
       </div>
 
-      {/* Sentiment bars */}
       <div className="space-y-2.5 mb-4">
         <div>
           <div className="flex justify-between text-[10px] text-slate-400 mb-1">
@@ -115,7 +120,6 @@ function ProductMockup() {
         </div>
       </div>
 
-      {/* Sparkline (fake SVG) */}
       <div className="mb-4">
         <svg viewBox="0 0 240 48" className="w-full h-10" preserveAspectRatio="none">
           <polyline
@@ -137,7 +141,6 @@ function ProductMockup() {
         </svg>
       </div>
 
-      {/* Stats row */}
       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-700/50">
         <div>
           <div className="text-base font-bold text-white font-mono">1,847</div>
@@ -161,17 +164,15 @@ function Navbar() {
   return (
     <nav className="nav-blur fixed top-0 left-0 right-0 z-50 border-b border-slate-200">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-        {/* Logo */}
-        <a href="/" className="flex items-center gap-2.5 no-underline">
+        <Link to="/" className="flex items-center gap-2.5 no-underline">
           <div className="w-7 h-7 rounded-md bg-slate-900 flex items-center justify-center flex-shrink-0">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
           </div>
           <span className="font-bold text-slate-900 text-sm tracking-tight">Sentiment OS</span>
-        </a>
+        </Link>
 
-        {/* Nav links */}
         <div className="hidden md:flex items-center gap-6">
           {["Product", "How it works", "API"].map((item) => (
             <a
@@ -184,14 +185,13 @@ function Navbar() {
           ))}
         </div>
 
-        {/* CTA */}
-        <a
-          href="/app"
+        <Link
+          to="/app"
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-white bg-slate-900 no-underline px-4 py-2 rounded-lg transition-all duration-150 hover:bg-slate-700"
         >
           Open Dashboard
           <IconArrowRight className="w-3.5 h-3.5" />
-        </a>
+        </Link>
       </div>
     </nav>
   );
@@ -203,7 +203,6 @@ function Hero() {
     <section className="bg-slate-950 hero-grid pt-28 pb-20 px-6 overflow-hidden">
       <div className="max-w-6xl mx-auto">
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
-          {/* Left: copy */}
           <div>
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-full mb-6 tracking-wide uppercase">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
@@ -221,13 +220,13 @@ function Hero() {
             </p>
 
             <div className="flex flex-wrap items-center gap-3 mb-10">
-              <a
-                href="/app"
+              <Link
+                to="/app"
                 className="inline-flex items-center gap-2 text-sm font-semibold text-white bg-brand-600 no-underline px-5 py-2.5 rounded-lg transition-all duration-150 hover:bg-brand-500"
               >
                 Open Dashboard
                 <IconArrowRight className="w-4 h-4" />
-              </a>
+              </Link>
               <a
                 href="#how-it-works"
                 className="inline-flex items-center gap-2 text-sm font-medium text-slate-400 no-underline transition-colors duration-150 hover:text-white"
@@ -237,7 +236,6 @@ function Hero() {
               </a>
             </div>
 
-            {/* Proof points */}
             <div className="flex flex-wrap gap-4">
               {["Wilson confidence intervals", "Azure AI Language scoring", "YouTube + X ingestion"].map((item) => (
                 <div key={item} className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -248,7 +246,6 @@ function Hero() {
             </div>
           </div>
 
-          {/* Right: product card */}
           <div className="flex justify-center lg:justify-end">
             <ProductMockup />
           </div>
@@ -367,7 +364,6 @@ function HowItWorks() {
       <div className="max-w-6xl mx-auto">
         <div className="fade-up" ref={ref}>
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-start">
-            {/* Left: label + heading */}
             <div className="lg:sticky lg:top-24">
               <div className="text-xs font-bold uppercase tracking-widest text-brand-600 mb-3">Process</div>
               <h2 className="text-3xl font-bold text-slate-900 tracking-tight mb-4">
@@ -377,16 +373,15 @@ function HowItWorks() {
                 The entire pipeline — from live social data to statistical conclusion — runs automatically,
                 without requiring any manual configuration or analysis.
               </p>
-              <a
-                href="/app"
+              <Link
+                to="/app"
                 className="inline-flex items-center gap-2 text-sm font-semibold text-brand-600 no-underline hover:text-brand-700 transition-colors"
               >
                 Try it in the dashboard
                 <IconArrowRight className="w-4 h-4" />
-              </a>
+              </Link>
             </div>
 
-            {/* Right: steps */}
             <div className="flex flex-col gap-0">
               {STEPS.map((step, i) => (
                 <div key={step.num} className={`relative flex gap-5 pb-8 ${i < STEPS.length - 1 ? "step-line" : ""}`}>
@@ -452,7 +447,6 @@ function ApiSection() {
       <div className="max-w-6xl mx-auto">
         <div className="fade-up" ref={ref}>
           <div className="grid lg:grid-cols-2 gap-12 items-center">
-            {/* Left */}
             <div>
               <div className="text-xs font-bold uppercase tracking-widest text-brand-600 mb-3">Backend</div>
               <h2 className="text-3xl font-bold text-slate-900 tracking-tight mb-4">
@@ -481,7 +475,6 @@ function ApiSection() {
               </ul>
             </div>
 
-            {/* Right: code block mockup */}
             <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden">
               <div className="flex items-center gap-1.5 px-4 py-3 border-b border-slate-800">
                 {["bg-red-500", "bg-amber-400", "bg-emerald-400"].map((c) => (
@@ -549,13 +542,13 @@ function CallToAction() {
           No setup required — the pipeline is ready.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
-          <a
-            href="/app"
+          <Link
+            to="/app"
             className="inline-flex items-center gap-2 text-sm font-semibold text-white bg-brand-600 no-underline px-6 py-3 rounded-lg transition-all duration-150 hover:bg-brand-500"
           >
             Open Dashboard
             <IconArrowRight className="w-4 h-4" />
-          </a>
+          </Link>
           <a
             href="#how-it-works"
             className="inline-flex items-center gap-2 text-sm font-medium text-slate-400 bg-slate-800 no-underline px-5 py-3 rounded-lg transition-all duration-150 hover:bg-slate-700 hover:text-white border border-slate-700"
@@ -578,7 +571,6 @@ function Footer() {
     <footer className="bg-slate-950 border-t border-slate-800 px-6 py-10">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row justify-between gap-8 mb-8">
-          {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-2">
               <div className="w-6 h-6 rounded bg-slate-800 flex items-center justify-center">
@@ -593,7 +585,6 @@ function Footer() {
             </p>
           </div>
 
-          {/* Links */}
           <div className="flex gap-12">
             <div>
               <div className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Product</div>
@@ -604,9 +595,15 @@ function Footer() {
                   { label: "API", href: "#api" },
                 ].map(({ label, href }) => (
                   <li key={label}>
-                    <a href={href} className="text-xs text-slate-400 no-underline hover:text-white transition-colors duration-150">
-                      {label}
-                    </a>
+                    {href.startsWith("/") ? (
+                      <Link to={href} className="text-xs text-slate-400 no-underline hover:text-white transition-colors duration-150">
+                        {label}
+                      </Link>
+                    ) : (
+                      <a href={href} className="text-xs text-slate-400 no-underline hover:text-white transition-colors duration-150">
+                        {label}
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -626,7 +623,7 @@ function Footer() {
 
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-6 border-t border-slate-800">
           <p className="text-xs text-slate-600">
-            &copy; {year} Sentiment OS. All rights reserved.
+            &copy; {new Date().getFullYear()} Sentiment OS. All rights reserved.
           </p>
           <p className="text-xs text-slate-600">
             iPhone vs. Android · Public opinion measured in real time
