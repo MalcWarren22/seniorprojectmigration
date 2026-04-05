@@ -1,5 +1,5 @@
 locals {
-  sqlcon = "Driver={ODBC Driver 18 for SQL Server};Server=tcp:${azurerm_mssql_server.this.fully_qualified_domain_name},1433;Database=${azurerm_mssql_database.this.name};Uid=${var.sql_admin_username};Pwd=${random_password.sql_admin.result};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+  sqlcon = "Driver={ODBC Driver 18 for SQL Server};Server=tcp:sql-dev-db-44v3.database.windows.net,1433;Database=sentiment;Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;Authentication=ActiveDirectoryMsi;"
 }
 
 
