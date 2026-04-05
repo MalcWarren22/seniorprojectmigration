@@ -33,13 +33,6 @@ resource "azurerm_mssql_database" "this" {
   server_id = azurerm_mssql_server.this.id
   sku_name  = "Basic"
 }
-
-resource "azurerm_key_vault_secret" "sqlcon" {
-  name = "sql-conn-dev"
-  value = local.sqlcon
-  key_vault_id = var.key_vault_id
-}
-
 resource "azurerm_mssql_firewall_rule" "allow_azure" {
   name             = "AllowAzureServices"
   server_id        = azurerm_mssql_server.this.id
